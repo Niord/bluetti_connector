@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bluetti-connector"
+version = "0.1.0"
+description = "Standalone BLUETTI connector with a local backend and web control surface"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "aiohttp>=3.9,<4.0",
+  "fastapi>=0.115,<1.0",
+  "pydantic>=2.9,<3.0",
+  "pydantic-settings>=2.6,<3.0",
+  "PyYAML>=6.0,<7.0",
+  "python-dotenv>=1.0,<2.0",
+  "stomper>=0.4.3,<0.5",
+  "uvicorn>=0.32,<1.0",
+  "websocket-client>=1.8,<2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.27,<1.0",
+  "pytest>=8.3,<9.0",
+  "pytest-asyncio>=0.24,<1.0",
+  "ruff>=0.7,<1.0",
+]
+
+[project.scripts]
+bluetti-connector-dev = "bluetti_connector.cli:main"
+
+[tool.hatch.build]
+include = [
+  "src/bluetti_connector/core/profile/*.yaml",
+  "src/bluetti_connector/web/**/*.js",
+  "src/bluetti_connector/web/**/*.html",
+  "src/bluetti_connector/web/**/*.css",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bluetti_connector"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+asyncio_mode = "auto"

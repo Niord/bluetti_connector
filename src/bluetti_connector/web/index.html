@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>BLUETTI Connector</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <p class="eyebrow">Local Control</p>
+      <h1>BLUETTI Connector</h1>
+      <p class="lead">
+        Configure a local BLUETTI session, load your devices from the backend, refresh
+        their state, and trigger the first safe control actions from one local page.
+      </p>
+
+      <section class="card panel-grid">
+        <div>
+          <div class="section-header">
+            <div>
+              <p class="section-eyebrow">Session</p>
+              <h2>Configure Backend Session</h2>
+            </div>
+            <span id="session-status-pill" class="status-pill status-pill--muted" data-testid="session-status-pill">Not configured</span>
+          </div>
+
+          <p class="supporting-copy">
+            The browser only talks to your local backend. BLUETTI cloud credentials and tokens stay on the server side.
+          </p>
+
+          <form id="session-form" class="form-stack" data-testid="session-form">
+            <label class="field">
+              <span>Access token</span>
+              <input id="access-token" name="accessToken" type="password" autocomplete="off" required placeholder="Paste a BLUETTI access token">
+            </label>
+
+            <div class="field-grid">
+              <label class="field">
+                <span>Gateway URL</span>
+                <input id="gateway-url" name="gatewayUrl" type="url" placeholder="https://gw.bluettipower.com">
+              </label>
+
+              <label class="field">
+                <span>SSO URL</span>
+                <input id="sso-url" name="ssoUrl" type="url" placeholder="https://sso.bluettipower.com">
+              </label>
+            </div>
+
+            <label class="field">
+              <span>WebSocket URL</span>
+              <input id="wss-url" name="wssUrl" type="url" placeholder="wss://gw.bluettipower.com/api/edgeiotgw/ws-coordination/">
+            </label>
+
+            <div class="toolbar">
+              <button id="session-submit" type="submit" class="button button--primary">Save session</button>
+              <button id="load-devices" type="button" class="button button--ghost">Load devices</button>
+            </div>
+          </form>
+
+          <div id="session-feedback" class="feedback feedback--hidden" aria-live="polite" data-testid="session-feedback" hidden></div>
+        </div>
+
+        <aside class="info-panel">
+          <p class="section-eyebrow">Backend</p>
+          <h2>Current Runtime</h2>
+          <dl class="meta-list" id="runtime-meta">
+            <div>
+              <dt>Environment</dt>
+              <dd id="meta-environment">development</dd>
+            </div>
+            <div>
+              <dt>Server</dt>
+              <dd id="meta-server">127.0.0.1:8080</dd>
+            </div>
+            <div>
+              <dt>Session source</dt>
+              <dd id="meta-session-source">None</dd>
+            </div>
+            <div>
+              <dt>Access token</dt>
+              <dd id="meta-access-token">Missing</dd>
+            </div>
+          </dl>
+        </aside>
+      </section>
+
+      <section class="card">
+        <div class="section-header">
+          <div>
+            <p class="section-eyebrow">Devices</p>
+            <h2>Available BLUETTI Devices</h2>
+          </div>
+          <span id="device-count" class="status-pill status-pill--muted" data-testid="device-count">0 devices</span>
+        </div>
+
+        <p class="supporting-copy">
+          The first UI slice supports device overview, per-device refresh, and simple on or off commands for switch-like states.
+        </p>
+
+        <div class="toolbar toolbar--devices">
+          <button id="reload-devices" type="button" class="button button--secondary">Refresh all devices</button>
+        </div>
+
+        <div id="devices-feedback" class="feedback feedback--hidden" aria-live="polite" data-testid="devices-feedback" hidden></div>
+        <div id="devices-loading" class="state-banner state-banner--info state-banner--hidden" data-testid="devices-loading" hidden>Loading devices from the local backend…</div>
+        <div id="devices-error" class="state-banner state-banner--error state-banner--hidden" data-testid="devices-error" hidden></div>
+        <div id="devices-empty" class="state-banner state-banner--empty state-banner--hidden" data-testid="devices-empty" hidden>No BLUETTI devices are currently available from the configured session.</div>
+
+        <section id="device-grid" class="device-grid" data-testid="device-grid"></section>
+      </section>
+    </main>
+
+    <script type="module" src="/assets/app.js"></script>
+  </body>
+</html>

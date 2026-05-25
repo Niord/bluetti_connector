@@ -4,6 +4,10 @@
 .github/prompts/
 .github/skills/
 
+# Local runtime configuration
+.env
+.local/
+
 # Python caches and virtual environments
 __pycache__/
 *.py[cod]
@@ -13,6 +17,7 @@ venv/
 # Test and type checker caches
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
 
 # macOS
 .DS_Store

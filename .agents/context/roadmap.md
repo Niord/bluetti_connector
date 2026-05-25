@@ -1,15 +1,19 @@
 # Roadmap
 
-## Active Workstreams
-- Bootstrap the repository for standalone BLUETTI connector development.
-- Extract a reusable Python core from the upstream Home Assistant integration.
-- Build a local backend and a minimal local web page for state display and safe device control.
+## Current Baseline
+- No active OpenSpec changes are currently open.
+- The initial standalone BLUETTI baseline is archived at `openspec/changes/archive/2026-05-25-build-local-bluetti-control/`.
+- The repository now includes the standalone core, local backend API, local web control page, main capability specs, and a documented fake-gateway smoke harness.
+
+## Next Workstreams
+- Validate the standalone auth and token refresh path against a real BLUETTI account now that deterministic local verification exists.
+- Decide the next safe command expansion and whether polling remains sufficient or websocket push is required.
 
 ## Next Decisions
-- Decide how upstream source will be referenced locally: vendored snapshot, subtree, or documented external reference.
-- Define the standalone authentication approach that replaces the Home Assistant OAuth flow.
-- Define the first supported command set for the local web page.
+- Define the standalone authentication approach and token persistence model for non-test usage.
+- Choose the first post-baseline slice: broader command coverage, live-auth hardening, or periodic auto-refresh.
+- Decide how the local backend and web UI should be packaged for local operators.
 
 ## Later
-- Add repeatable test and smoke-check commands once the Python and web project structure exists.
-- Decide packaging and distribution strategy for the standalone connector.
+- Consolidate repeated fake-gateway verification helpers if the smoke surface grows.
+- Evaluate websocket-driven updates after the polling-based local control slice is stable.

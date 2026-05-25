@@ -1,4 +1,5 @@
 # Known Issues
 
 - The upstream BLUETTI integration mixes Home Assistant lifecycle code with reusable transport and device logic. Workaround: extract `api/`, `model/`, `profile/`, and domain pieces from `models.py` before rebuilding UI or automation layers.
-- Standalone authentication requirements are not fully documented outside Home Assistant. Workaround: validate the cloud login and token refresh path with a dedicated extraction spike before building a broader local UI.
+- Standalone authentication requirements are not fully documented outside Home Assistant. Workaround: use the deterministic smoke harness (`tests/fake_bluetti_gateway.py`, `tests/core/test_standalone_core_smoke.py`, and `tests/backend/test_backend_smoke.py`) to validate device list, refresh, and control flows while the live account path is hardened.
+- The repository does not yet include automated verification against a real BLUETTI account. Workaround: run the documented local UI smoke flow in `README.md` with the fake gateway before testing live credentials.
