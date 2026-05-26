@@ -23,10 +23,10 @@ class Settings(BaseSettings):
     cloud_gateway_url: str = "https://gw.bluettipower.com"
     cloud_wss_url: str = "wss://gw.bluettipower.com/api/edgeiotgw/ws-coordination/"
 
-    username: str = ""
-    password: str = ""
     access_token: str = ""
     refresh_token: str = ""
+    oauth_client_id: str = "HomeAssistant"
+    oauth_client_secret: str = "SG9tZUFzc2lzdGFudA=="
     token_store_path: str = ".local/state/bluetti/tokens.json"
 
     request_timeout_seconds: float = 15.0
@@ -34,10 +34,6 @@ class Settings(BaseSettings):
     @property
     def token_store(self) -> Path:
         return Path(self.token_store_path)
-
-    @property
-    def has_login_credentials(self) -> bool:
-        return bool(self.username and self.password)
 
     @property
     def has_tokens(self) -> bool:

@@ -1,15 +1,28 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+
+AuthMode = Literal["token", "credentials"]
 
 
 class SessionSetupRequest(BaseModel):
-    accessToken: str = Field(min_length=1)
+    accessToken: str | None = Field(default=None, min_length=1)
+    refreshToken: str | None = Field(default=None, min_length=1)
     ssoUrl: str | None = None
     gatewayUrl: str | None = None
     wssUrl: str | None = None
+
+    @model_validator(mode="after")
+    def validate_auth_fields(self) -> "SessionSetupRequest":
+        has_token_input = bool(self.accessToken or self.refreshToken)
+
+        if not has_token_input:
+            raise ValueError("Provide an access token or refresh token.")
+
+        return self
 
 
 class DeviceCommandRequest(BaseModel):
@@ -20,7 +33,10 @@ class DeviceCommandRequest(BaseModel):
 class SessionSnapshot(BaseModel):
     configured: bool
     source: str | None = None
+    authMode: AuthMode | None = None
+    usesStoredSession: bool = False
     hasAccessToken: bool
+    hasRefreshToken: bool = False
     cloud: dict[str, str]
 
 

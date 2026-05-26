@@ -7,6 +7,7 @@ const state = {
 const elements = {
   sessionForm: document.querySelector('#session-form'),
   accessToken: document.querySelector('#access-token'),
+  refreshToken: document.querySelector('#refresh-token'),
   gatewayUrl: document.querySelector('#gateway-url'),
   ssoUrl: document.querySelector('#sso-url'),
   wssUrl: document.querySelector('#wss-url'),
@@ -24,7 +25,10 @@ const elements = {
   metaEnvironment: document.querySelector('#meta-environment'),
   metaServer: document.querySelector('#meta-server'),
   metaSessionSource: document.querySelector('#meta-session-source'),
+  metaAuthMode: document.querySelector('#meta-auth-mode'),
   metaAccessToken: document.querySelector('#meta-access-token'),
+  metaRefreshToken: document.querySelector('#meta-refresh-token'),
+  metaStoredSession: document.querySelector('#meta-stored-session'),
 };
 
 init().catch((error) => {
@@ -58,6 +62,7 @@ async function onSessionSubmit(event) {
   try {
     const payload = {
       accessToken: elements.accessToken.value.trim(),
+      refreshToken: elements.refreshToken.value.trim(),
       gatewayUrl: emptyToNull(elements.gatewayUrl.value),
       ssoUrl: emptyToNull(elements.ssoUrl.value),
       wssUrl: emptyToNull(elements.wssUrl.value),
@@ -100,6 +105,7 @@ async function onDeviceGridClick(event) {
       const payload = await requestJson(`/api/devices/${encodeURIComponent(deviceSn)}/refresh`, {
         method: 'POST',
       });
+      await syncSessionStatus();
       upsertDevice(payload.item);
       renderDevices();
       feedbackNode = findDeviceFeedbackNode(deviceSn);
@@ -117,6 +123,7 @@ async function onDeviceGridClick(event) {
           fnValue: actionButton.dataset.nextValue,
         }),
       });
+      await syncSessionStatus();
       upsertDevice(payload.device);
       renderDevices();
       feedbackNode = findDeviceFeedbackNode(deviceSn);
@@ -124,6 +131,7 @@ async function onDeviceGridClick(event) {
       showFeedback(elements.devicesFeedback, `Command applied to ${payload.device.name}.`, 'success');
     }
   } catch (error) {
+    await syncSessionStatusAfterAuthError(error);
     const message = formatError(error);
     setDeviceFeedback(feedbackNode, message, 'error');
     showFeedback(elements.devicesFeedback, message, 'error');
@@ -140,8 +148,7 @@ async function loadBootstrap() {
 }
 
 async function loadSession() {
-  state.session = await requestJson('/api/session');
-  renderSession();
+  await syncSessionStatus();
 }
 
 async function fetchDevices() {
@@ -152,11 +159,13 @@ async function fetchDevices() {
   try {
     const payload = await requestJson('/api/devices');
     state.devices = payload.items;
+    await syncSessionStatus();
     renderDevices();
     if (payload.count > 0) {
       showFeedback(elements.devicesFeedback, `Loaded ${payload.count} device${payload.count === 1 ? '' : 's'}.`, 'success');
     }
   } catch (error) {
+    await syncSessionStatusAfterAuthError(error);
     state.devices = [];
     renderDevices();
     showDeviceError(formatError(error));
@@ -170,7 +179,10 @@ function renderSession() {
   elements.sessionStatusPill.textContent = configured ? 'Configured' : 'Not configured';
   elements.sessionStatusPill.className = configured ? 'status-pill status-pill--success' : 'status-pill status-pill--muted';
   elements.metaSessionSource.textContent = state.session?.source || 'None';
+  elements.metaAuthMode.textContent = state.session?.authMode || 'None';
   elements.metaAccessToken.textContent = state.session?.hasAccessToken ? 'Present' : 'Missing';
+  elements.metaRefreshToken.textContent = state.session?.hasRefreshToken ? 'Present' : 'Missing';
+  elements.metaStoredSession.textContent = state.session?.usesStoredSession ? 'Yes' : 'No';
 
   const cloud = state.session?.cloud || state.bootstrap?.cloud;
   if (cloud) {
@@ -183,6 +195,23 @@ function renderSession() {
     if (!elements.wssUrl.value) {
       elements.wssUrl.value = cloud.wssUrl || '';
     }
+  }
+}
+
+async function syncSessionStatus() {
+  state.session = await requestJson('/api/session');
+  renderSession();
+}
+
+async function syncSessionStatusAfterAuthError(error) {
+  if (!isAuthSessionError(error)) {
+    return;
+  }
+
+  try {
+    await syncSessionStatus();
+  } catch {
+    // Keep the original request error visible if status refresh also fails.
   }
 }
 
@@ -365,9 +394,14 @@ async function requestJson(url, options = {}) {
   const payload = text ? JSON.parse(text) : {};
 
   if (!response.ok) {
-    const error = payload?.error || {};
-    const details = error.details;
-    throw new Error(error.message || `Request failed with status ${response.status}`, { cause: details });
+    const errorPayload = payload?.error || {};
+    const requestError = new Error(errorPayload.message || `Request failed with status ${response.status}`, {
+      cause: errorPayload.details,
+    });
+    requestError.code = errorPayload.code || 'REQUEST_FAILED';
+    requestError.details = errorPayload.details;
+    requestError.status = response.status;
+    throw requestError;
   }
 
   return payload;
@@ -393,6 +427,10 @@ function formatError(error) {
     return error.message;
   }
   return 'An unexpected UI error occurred.';
+}
+
+function isAuthSessionError(error) {
+  return error instanceof Error && (error.code === 'AUTHENTICATION_EXPIRED' || error.code === 'SESSION_NOT_CONFIGURED');
 }
 
 function escapeHtml(value) {

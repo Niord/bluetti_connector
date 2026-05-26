@@ -121,6 +121,15 @@ rtk init                # Add RTK instructions to CLAUDE.md
 rtk init --global       # Add RTK to ~/.claude/CLAUDE.md
 ```
 
+### OpenSpec Workflow
+```bash
+DO_NOT_TRACK=1 rtk openspec status --change <name> --json 2>/dev/null
+DO_NOT_TRACK=1 rtk openspec instructions apply --change <name> --json 2>/dev/null
+DO_NOT_TRACK=1 rtk openspec validate --all --no-interactive 2>/dev/null
+```
+
+Use `--all --no-interactive` for validation so the CLI does not stop in the picker menu.
+
 ## Token Savings Overview
 
 | Category | Commands | Typical Savings |

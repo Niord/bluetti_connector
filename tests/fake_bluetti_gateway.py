@@ -36,6 +36,9 @@ def build_state() -> dict[str, object]:
             ],
         },
         "last_control": None,
+        "active_access_token": "test-access-token",
+        "active_refresh_token": "test-refresh-token",
+        "refresh_requests": [],
     }
 
 
@@ -43,7 +46,21 @@ def create_fake_gateway_app() -> web.Application:
     state = build_state()
     app = web.Application()
 
+    def token_expired_response() -> web.Response:
+        return web.json_response(
+            {
+                "msgId": "auth-expired",
+                "msgCode": 805,
+                "data": None,
+            }
+        )
+
+    def is_authorized(request: web.Request) -> bool:
+        return request.headers.get("Authorization") == state["active_access_token"]
+
     async def devices_handler(request: web.Request) -> web.Response:
+        if not is_authorized(request):
+            return token_expired_response()
         return web.json_response(
             {
                 "msgId": "devices",
@@ -53,6 +70,8 @@ def create_fake_gateway_app() -> web.Application:
         )
 
     async def device_states_handler(request: web.Request) -> web.Response:
+        if not is_authorized(request):
+            return token_expired_response()
         sns = request.query.get("sns")
         devices = [deepcopy(state["device"])]
         if sns:
@@ -66,6 +85,8 @@ def create_fake_gateway_app() -> web.Application:
         )
 
     async def control_handler(request: web.Request) -> web.Response:
+        if not is_authorized(request):
+            return token_expired_response()
         payload = await request.json()
         state["last_control"] = payload
         for item in state["device"]["stateList"]:
@@ -80,9 +101,34 @@ def create_fake_gateway_app() -> web.Application:
             }
         )
 
+    async def token_handler(request: web.Request) -> web.Response:
+        payload = dict(await request.post())
+        state["refresh_requests"].append(payload)
+
+        if payload.get("grant_type") != "refresh_token":
+            return web.json_response({"error": "unsupported_grant_type"}, status=400)
+        if payload.get("client_id") != "HomeAssistant" or payload.get("client_secret") != "SG9tZUFzc2lzdGFudA==":
+            return web.json_response({"error": "unauthorized_client"}, status=401)
+        if payload.get("refresh_token") != state["active_refresh_token"]:
+            return web.json_response({"error": "invalid_grant"}, status=400)
+
+        refresh_number = len(state["refresh_requests"])
+        state["active_access_token"] = f"refreshed-access-token-{refresh_number}"
+        state["active_refresh_token"] = f"refreshed-refresh-token-{refresh_number}"
+        return web.json_response(
+            {
+                "access_token": state["active_access_token"],
+                "refresh_token": state["active_refresh_token"],
+                "expires_in": 3600,
+                "created_at": 1716681600,
+                "token_type": "Bearer",
+            }
+        )
+
     app.router.add_get("/api/bluiotdata/ha/v1/devices", devices_handler)
     app.router.add_get("/api/bluiotdata/ha/v1/deviceStates", device_states_handler)
     app.router.add_post("/api/bluiotdata/ha/v1/fulfillment", control_handler)
+    app.router.add_post("/sso/oauth2/token", token_handler)
     return app
 
 

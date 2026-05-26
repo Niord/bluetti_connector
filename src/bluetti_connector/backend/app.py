@@ -31,7 +31,6 @@ def create_app() -> FastAPI:
         return {
             "status": "ok",
             "environment": settings.environment,
-            "hasCredentials": settings.has_login_credentials,
             "hasTokens": settings.has_tokens,
             "sessionConfigured": backend_service.get_session_snapshot().configured,
         }

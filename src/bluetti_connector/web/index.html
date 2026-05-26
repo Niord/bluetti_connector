@@ -29,11 +29,22 @@
             The browser only talks to your local backend. BLUETTI cloud credentials and tokens stay on the server side.
           </p>
 
+          <p class="supporting-copy">
+            Supply an access token, a refresh token, or both. When a refresh token is available, the backend can recover the session locally after token expiry.
+          </p>
+
           <form id="session-form" class="form-stack" data-testid="session-form">
-            <label class="field">
-              <span>Access token</span>
-              <input id="access-token" name="accessToken" type="password" autocomplete="off" required placeholder="Paste a BLUETTI access token">
-            </label>
+            <div class="field-grid">
+              <label class="field">
+                <span>Access token</span>
+                <input id="access-token" name="accessToken" type="password" autocomplete="off" placeholder="Optional when a refresh token is available">
+              </label>
+
+              <label class="field">
+                <span>Refresh token</span>
+                <input id="refresh-token" name="refreshToken" type="password" autocomplete="off" placeholder="Paste a BLUETTI refresh token">
+              </label>
+            </div>
 
             <div class="field-grid">
               <label class="field">
@@ -78,8 +89,20 @@
               <dd id="meta-session-source">None</dd>
             </div>
             <div>
+              <dt>Auth mode</dt>
+              <dd id="meta-auth-mode">None</dd>
+            </div>
+            <div>
               <dt>Access token</dt>
               <dd id="meta-access-token">Missing</dd>
+            </div>
+            <div>
+              <dt>Refresh token</dt>
+              <dd id="meta-refresh-token">Missing</dd>
+            </div>
+            <div>
+              <dt>Stored session</dt>
+              <dd id="meta-stored-session">No</dd>
             </div>
           </dl>
         </aside>

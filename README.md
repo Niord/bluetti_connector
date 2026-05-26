@@ -21,7 +21,7 @@ Standalone BLUETTI connector under extraction from the official Home Assistant i
 3. `python -m pip install --upgrade pip`
 4. `python -m pip install -e '.[dev]'`
 5. `cp .env.example .env`
-6. Fill in the BLUETTI credentials or token values you want to use locally if you want startup defaults
+6. Fill in the BLUETTI access-token or refresh-token values you want to use locally if you want startup defaults
 7. `bluetti-connector-dev`
 8. Open `http://127.0.0.1:8080`
 
@@ -41,8 +41,10 @@ The application reads `.env` values with the `BLUETTI_` prefix. The initial boot
 
 - app and server: `BLUETTI_APP_NAME`, `BLUETTI_ENVIRONMENT`, `BLUETTI_SERVER_HOST`, `BLUETTI_SERVER_PORT`, `BLUETTI_DEV_RELOAD`
 - BLUETTI cloud endpoints: `BLUETTI_CLOUD_SSO_URL`, `BLUETTI_CLOUD_GATEWAY_URL`, `BLUETTI_CLOUD_WSS_URL`
-- credentials and tokens: `BLUETTI_USERNAME`, `BLUETTI_PASSWORD`, `BLUETTI_ACCESS_TOKEN`, `BLUETTI_REFRESH_TOKEN`, `BLUETTI_TOKEN_STORE_PATH`
+- session and refresh tokens: `BLUETTI_ACCESS_TOKEN`, `BLUETTI_REFRESH_TOKEN`, `BLUETTI_OAUTH_CLIENT_ID`, `BLUETTI_OAUTH_CLIENT_SECRET`, `BLUETTI_TOKEN_STORE_PATH`
 - runtime behavior: `BLUETTI_REQUEST_TIMEOUT_SECONDS`
+
+The standalone runtime currently supports direct access tokens, direct refresh tokens, or both. A live probe against `https://sso.bluettipower.com/oauth2/token` rejected `grant_type=password`, so direct username and password bootstrap is intentionally out of scope.
 
 ## Verification
 
@@ -64,18 +66,18 @@ Use the reusable fake gateway to validate the browser flow without a real BLUETT
 2. Start the local app: `bluetti-connector-dev`
 3. Open `http://127.0.0.1:8080`
 4. Click `Load devices` before configuring a session and confirm the page shows the backend session error
-5. Fill the session form with any non-empty access token, `http://127.0.0.1:18081` as Gateway URL, `http://127.0.0.1:18081/sso` as SSO URL, and `ws://127.0.0.1/unused` as WebSocket URL
-6. Save the session and confirm the page renders `Workshop Battery`
-7. Refresh devices and toggle `AC Output`; confirm success feedback and the button label changes between on and off
+5. Fill the session form with `expired-access-token` as the access token, `test-refresh-token` as the refresh token, `http://127.0.0.1:18081` as Gateway URL, `http://127.0.0.1:18081/sso` as SSO URL, and `ws://127.0.0.1/unused` as WebSocket URL
+6. Save the session and confirm the page renders `Workshop Battery` even though the initial access token is stale
+7. Refresh devices and toggle `AC Output`; confirm success feedback and the runtime panel shows that both access and refresh tokens are present
 
 ## Current Scope
 
 Implemented in the current baseline:
 
 - standalone core extraction without `homeassistant` imports
-- local backend session setup, device listing, device refresh, and initial command execution
+- local backend session setup, refresh-token bootstrap, device listing, device refresh, and initial command execution
 - backend-served local UI with loading, empty, error, and command feedback states
-- deterministic smoke verification against a fake BLUETTI gateway
+- deterministic smoke verification against a fake BLUETTI gateway, including token refresh and retry recovery
 
 Still intentionally out of scope for the first change:
 

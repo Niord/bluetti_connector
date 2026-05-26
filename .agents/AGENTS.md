@@ -95,7 +95,7 @@ A task is complete only when:
 - Instruction or documentation changes: verify touched files render correctly and run diagnostics where available.
 - Python changes: run the narrowest relevant executable check available, such as `rtk pytest <target>`, `rtk python -m compileall <path>`, or a feature-scoped smoke command.
 - Local backend or web changes: run the narrowest relevant executable check and record any manual smoke verification needed for the touched flow.
-- OpenSpec artifacts: run `DO_NOT_TRACK=1 rtk openspec validate 2>/dev/null` when a change exists.
+- OpenSpec artifacts: run `DO_NOT_TRACK=1 rtk openspec validate --all --no-interactive 2>/dev/null` when a change exists.
 
 Required checks are only valid done gates when they are currently trustworthy in this repository state. If a check is missing, noisy, or not yet bootstrapped, document that fact in the active OpenSpec change and `.agents/context/known-issues.md`.
 

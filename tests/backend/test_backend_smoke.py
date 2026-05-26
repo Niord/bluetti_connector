@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from copy import deepcopy
+import json
 from typing import Any
 
 import pytest
@@ -42,9 +43,26 @@ async def fake_bluetti_gateway() -> AsyncIterator[tuple[str, dict[str, Any]]]:
             ],
         },
         "last_control": None,
+        "active_access_token": "test-access-token",
+        "active_refresh_token": "test-refresh-token",
+        "refresh_requests": [],
     }
 
+    def token_expired_response() -> web.Response:
+        return web.json_response(
+            {
+                "msgId": "auth-expired",
+                "msgCode": 805,
+                "data": None,
+            }
+        )
+
+    def is_authorized(request: web.Request) -> bool:
+        return request.headers.get("Authorization") == state["active_access_token"]
+
     async def devices_handler(request: web.Request) -> web.Response:
+        if not is_authorized(request):
+            return token_expired_response()
         return web.json_response(
             {
                 "msgId": "devices",
@@ -54,6 +72,8 @@ async def fake_bluetti_gateway() -> AsyncIterator[tuple[str, dict[str, Any]]]:
         )
 
     async def device_states_handler(request: web.Request) -> web.Response:
+        if not is_authorized(request):
+            return token_expired_response()
         sns = request.query.get("sns")
         devices = [deepcopy(state["device"])]
         if sns:
@@ -67,6 +87,8 @@ async def fake_bluetti_gateway() -> AsyncIterator[tuple[str, dict[str, Any]]]:
         )
 
     async def control_handler(request: web.Request) -> web.Response:
+        if not is_authorized(request):
+            return token_expired_response()
         payload = await request.json()
         state["last_control"] = payload
         for item in state["device"]["stateList"]:
@@ -81,10 +103,35 @@ async def fake_bluetti_gateway() -> AsyncIterator[tuple[str, dict[str, Any]]]:
             }
         )
 
+    async def token_handler(request: web.Request) -> web.Response:
+        payload = dict(await request.post())
+        state["refresh_requests"].append(payload)
+
+        if payload.get("grant_type") != "refresh_token":
+            return web.json_response({"error": "unsupported_grant_type"}, status=400)
+        if payload.get("client_id") != "HomeAssistant" or payload.get("client_secret") != "SG9tZUFzc2lzdGFudA==":
+            return web.json_response({"error": "unauthorized_client"}, status=401)
+        if payload.get("refresh_token") != state["active_refresh_token"]:
+            return web.json_response({"error": "invalid_grant"}, status=400)
+
+        refresh_number = len(state["refresh_requests"])
+        state["active_access_token"] = f"refreshed-access-token-{refresh_number}"
+        state["active_refresh_token"] = f"refreshed-refresh-token-{refresh_number}"
+        return web.json_response(
+            {
+                "access_token": state["active_access_token"],
+                "refresh_token": state["active_refresh_token"],
+                "expires_in": 3600,
+                "created_at": 1716681600,
+                "token_type": "Bearer",
+            }
+        )
+
     app = web.Application()
     app.router.add_get("/api/bluiotdata/ha/v1/devices", devices_handler)
     app.router.add_get("/api/bluiotdata/ha/v1/deviceStates", device_states_handler)
     app.router.add_post("/api/bluiotdata/ha/v1/fulfillment", control_handler)
+    app.router.add_post("/sso/oauth2/token", token_handler)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -171,3 +218,72 @@ async def test_backend_returns_sanitized_errors() -> None:
         )
         assert validation_error.status_code == 422
         assert validation_error.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_backend_bootstraps_from_refresh_token_only(
+    fake_bluetti_gateway: tuple[str, dict[str, Any]],
+    tmp_path,
+) -> None:
+    base_url, state = fake_bluetti_gateway
+    app = create_app()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        session_response = await client.post(
+            "/api/session",
+            json={
+                "refreshToken": "test-refresh-token",
+                "ssoUrl": f"{base_url}/sso",
+                "gatewayUrl": base_url,
+                "wssUrl": "ws://127.0.0.1/unused",
+            },
+        )
+        assert session_response.status_code == 200
+        assert session_response.json()["hasAccessToken"] is False
+        assert session_response.json()["hasRefreshToken"] is True
+
+        devices_response = await client.get("/api/devices")
+        assert devices_response.status_code == 200
+        assert devices_response.json()["count"] == 1
+        assert len(state["refresh_requests"]) == 1
+
+        persisted = json.loads((tmp_path / "tokens.json").read_text())
+        assert persisted["accessToken"] == "refreshed-access-token-1"
+        assert persisted["refreshToken"] == "refreshed-refresh-token-1"
+
+
+@pytest.mark.asyncio
+async def test_backend_refreshes_expired_access_token_and_retries(
+    fake_bluetti_gateway: tuple[str, dict[str, Any]],
+    tmp_path,
+) -> None:
+    base_url, state = fake_bluetti_gateway
+    app = create_app()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        session_response = await client.post(
+            "/api/session",
+            json={
+                "accessToken": "expired-access-token",
+                "refreshToken": "test-refresh-token",
+                "ssoUrl": f"{base_url}/sso",
+                "gatewayUrl": base_url,
+                "wssUrl": "ws://127.0.0.1/unused",
+            },
+        )
+        assert session_response.status_code == 200
+
+        devices_response = await client.get("/api/devices")
+        assert devices_response.status_code == 200
+        assert devices_response.json()["count"] == 1
+        assert len(state["refresh_requests"]) == 1
+        assert state["refresh_requests"][0]["refresh_token"] == "test-refresh-token"
+
+        session_status = await client.get("/api/session")
+        assert session_status.status_code == 200
+        assert session_status.json()["hasAccessToken"] is True
+        assert session_status.json()["hasRefreshToken"] is True
+
+        persisted = json.loads((tmp_path / "tokens.json").read_text())
+        assert persisted["accessToken"] == "refreshed-access-token-1"
+        assert persisted["refreshToken"] == "refreshed-refresh-token-1"
