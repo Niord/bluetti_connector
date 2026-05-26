@@ -68,6 +68,10 @@ def create_app() -> FastAPI:
     async def session_status() -> dict[str, object]:
         return backend_service.get_session_snapshot().model_dump()
 
+    @app.get("/api/verification/live-account")
+    async def verify_live_account() -> dict[str, object]:
+        return (await backend_service.verify_live_account()).model_dump()
+
     @app.get("/api/live-updates")
     async def live_updates_stream() -> StreamingResponse:
         async def event_stream():

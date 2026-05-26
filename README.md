@@ -55,6 +55,7 @@ The local server binds to `http://127.0.0.1:8080` by default and serves:
 - `/api/devices/{device_sn}/refresh` - device state refresh through the backend
 - `/api/devices/{device_sn}/commands` - safe switch-style and select-style command execution through the backend
 - `/api/live-updates` - backend-owned local Server-Sent Events stream for live-update status and sanitized device-change hints
+- `/api/verification/live-account` - gated backend-owned live-account verification endpoint with staged sanitized results
 
 ## Runtime Settings
 
@@ -63,6 +64,7 @@ The application reads `.env` values with the `BLUETTI_` prefix. The initial boot
 - app and server: `BLUETTI_APP_NAME`, `BLUETTI_ENVIRONMENT`, `BLUETTI_SERVER_HOST`, `BLUETTI_SERVER_PORT`, `BLUETTI_DEV_RELOAD`
 - BLUETTI cloud endpoints: `BLUETTI_CLOUD_SSO_URL`, `BLUETTI_CLOUD_GATEWAY_URL`, `BLUETTI_CLOUD_WSS_URL`
 - session and refresh tokens: `BLUETTI_ACCESS_TOKEN`, `BLUETTI_REFRESH_TOKEN`, `BLUETTI_OAUTH_CLIENT_ID`, `BLUETTI_OAUTH_CLIENT_SECRET`, `BLUETTI_OAUTH_STATE_TTL_SECONDS`, `BLUETTI_TOKEN_STORE_PATH`
+- live verification gate: `BLUETTI_ENABLE_LIVE_ACCOUNT_VERIFICATION`
 - runtime behavior: `BLUETTI_REQUEST_TIMEOUT_SECONDS`
 
 Default runtime path behavior now depends on the startup mode:
@@ -123,6 +125,30 @@ For live-account verification:
 4. Complete BLUETTI login in the browser and confirm the app returns to `/` with a success message and a configured session
 5. If BLUETTI rejects the callback or the local redirect URI is not accepted, use the manual token form as a temporary fallback and record the exact failure in `.agents/context/known-issues.md`
 
+### Gated Live-Account Verification
+
+Use this flow only when you explicitly want real-account verification beyond fake-gateway checks.
+
+1. Start the app with real-account session inputs and set `BLUETTI_ENABLE_LIVE_ACCOUNT_VERIFICATION=true`
+2. Invoke the verification endpoint:
+
+```bash
+curl -sS http://127.0.0.1:8080/api/verification/live-account | python -m json.tool
+```
+
+3. Interpret staged results:
+- `auth` verifies backend-owned token readiness
+- `devices` verifies live account device discovery
+- `live-updates` verifies authenticated `wss://` readiness status (`connected`, `degraded`, or `unavailable`)
+4. If prerequisites are missing, the endpoint fails fast with `LIVE_VERIFICATION_PREREQUISITES_MISSING` and does not run cloud verification calls.
+
+Failure triage guidance:
+
+- `AUTHENTICATION_EXPIRED`: session refresh failed; reconfigure tokens or rerun browser OAuth
+- `BLUETTI_CONNECTIVITY_ERROR` or `BLUETTI_TIMEOUT`: transient network or upstream reachability issue
+- `BLUETTI_CLOUD_ERROR`: upstream rejected the operation (`upstreamCode` included without secrets)
+- `LIVE_UPDATES_DEGRADED` or `LIVE_UPDATES_UNAVAILABLE`: verify authenticated `wss://` URL and backend live-update status
+
 ## Current Scope
 
 Implemented in the current baseline:
@@ -132,9 +158,10 @@ Implemented in the current baseline:
 - local backend session setup, refresh-token bootstrap, backend-owned browser OAuth start/callback flow, device listing, device refresh, safe switch-style or select-style command execution, and backend-owned live-update lifecycle management
 - backend-served local UI with loading, empty, error, richer device-state display, safe command controls, backend-owned live-update status, and automatic per-device refresh when the backend publishes sanitized device-update events
 - deterministic smoke verification against a fake BLUETTI gateway, including token refresh and retry recovery, plus focused backend and frontend regression coverage for browser OAuth, live-update status, SSE fan-out, and UI refresh behavior
+- gated backend-owned live-account verification with fail-fast prerequisite validation and staged sanitized reporting for auth, devices, and live-update readiness
 
 Still intentionally out of scope for the first change:
 
-- automated verification against a real BLUETTI account
+- default CI execution of live-account verification against real BLUETTI cloud
 - free-form numeric or text command entry for BLUETTI states that do not expose safe allowed values in the current snapshot
 - native installers, service-manager integration, multi-user behavior, and fake-gateway websocket simulation

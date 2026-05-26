@@ -8,17 +8,18 @@
 - The expanded local control surface slice is archived at `openspec/changes/archive/2026-05-26-expand-local-control-surface/`.
 - The backend-owned websocket device updates slice is archived at `openspec/changes/archive/2026-05-26-add-websocket-device-updates/`.
 - The local operator runtime packaging slice is archived at `openspec/changes/archive/2026-05-26-package-local-operator-runtime/`.
-- The repository now includes the standalone core, local backend API, local web control page, refresh-capable token bootstrap, persisted token reuse, token refresh recovery, backend-owned browser OAuth start and callback flow, backend-normalized safe switch-style and select-style controls, synced main capability specs, backend-owned live updates with local SSE fan-out and UI auto-refresh, operator and development startup entrypoints, and documented fake-gateway plus live local-operator verification paths.
+- The live-account verification hardening slice is archived at `openspec/changes/archive/2026-05-26-harden-live-account-verification/`.
+- The repository now includes the standalone core, local backend API, local web control page, refresh-capable token bootstrap, persisted token reuse, token refresh recovery, backend-owned browser OAuth start and callback flow, backend-normalized safe switch-style and select-style controls, synced main capability specs, backend-owned live updates with local SSE fan-out and UI auto-refresh, operator and development startup entrypoints, and gated secret-safe live-account verification paths.
 
 ## Active Workstreams
 - The standalone auth path now includes both manual token entry and backend-owned browser OAuth for first-time local setup.
 - The current local control surface treats safe switch-style and select-style controls as backend-normalized metadata, while leaving states without verified allowed values read-only.
 - Backend-owned live updates now cover backend-managed BLUETTI websocket lifecycle, `/api/live-updates` SSE fan-out, session-level live-update status, and browser-side auto-refresh for visible device cards.
 - Backend-owned live updates degrade cleanly to manual refresh when websocket startup, authentication, disconnect, or unsupported `ws://` configuration prevents live delivery.
-- The current roadmap focus is live-account verification hardening beyond fake-gateway and synthetic regression coverage.
+- The current roadmap focus is extending operator confidence from gated live-account verification toward repeatable end-to-end verification workflows.
 
 ## Next Workstreams
-- Add a trustworthy live-account verification strategy beyond manual operator smoke runs.
+- Extend fake-gateway and integration coverage so more end-to-end live-update behavior is verifiable without real-account dependencies.
 
 ## Next Decisions
 - Decide whether manual token entry remains a permanent fallback after browser OAuth is live-validated.

@@ -56,6 +56,16 @@ class InvalidCommandError(BackendAppError):
         )
 
 
+class LiveVerificationPrerequisiteError(BackendAppError):
+    def __init__(self, *, missing: list[str]) -> None:
+        super().__init__(
+            status_code=400,
+            code="LIVE_VERIFICATION_PREREQUISITES_MISSING",
+            message="Live-account verification prerequisites are not satisfied.",
+            details={"missing": missing},
+        )
+
+
 def install_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(BackendAppError)
     async def handle_backend_error(request: Request, exc: BackendAppError) -> JSONResponse:

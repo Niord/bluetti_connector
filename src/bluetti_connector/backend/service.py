@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
 import secrets
 import time
+from urllib.parse import urlparse
 from typing import TypeVar
 from urllib.parse import urlencode
 
@@ -20,7 +21,7 @@ from ..core import (
     ProductClient,
 )
 from .auth import build_authorize_url, exchange_authorization_code, refresh_access_token
-from .errors import DeviceNotFoundError, InvalidCommandError, SessionNotConfiguredError
+from .errors import DeviceNotFoundError, InvalidCommandError, LiveVerificationPrerequisiteError, SessionNotConfiguredError
 from .live_updates import LiveUpdateEvent, LiveUpdatesManager
 from .schemas import (
     AuthMode,
@@ -29,6 +30,8 @@ from .schemas import (
     DevicePayload,
     DeviceRefreshResponse,
     DeviceStatePayload,
+    LiveAccountVerificationCheck,
+    LiveAccountVerificationResponse,
     SessionSnapshot,
     SessionSetupRequest,
 )
@@ -121,6 +124,30 @@ class BackendService:
         finally:
             self._live_updates.unsubscribe(subscriber_id)
 
+    async def verify_live_account(self) -> LiveAccountVerificationResponse:
+        missing_prerequisites = self._missing_live_prerequisites()
+        if missing_prerequisites:
+            raise LiveVerificationPrerequisiteError(missing=missing_prerequisites)
+
+        checks: list[LiveAccountVerificationCheck] = []
+
+        auth_check = await self._verify_auth_stage()
+        checks.append(auth_check)
+        if auth_check.status == "failed":
+            return LiveAccountVerificationResponse(ok=False, checks=checks)
+
+        devices_check = await self._verify_devices_stage()
+        checks.append(devices_check)
+        if devices_check.status == "failed":
+            return LiveAccountVerificationResponse(ok=False, checks=checks)
+
+        live_updates_check = self._verify_live_updates_stage()
+        checks.append(live_updates_check)
+        return LiveAccountVerificationResponse(
+            ok=all(check.status == "passed" for check in checks),
+            checks=checks,
+        )
+
     def configure_session(self, payload: SessionSetupRequest) -> SessionSnapshot:
         self._set_session_config(
             access_token=payload.accessToken,
@@ -207,6 +234,167 @@ class BackendService:
             )
 
         return self._settings_session_config()
+
+    def _missing_live_prerequisites(self) -> list[str]:
+        missing: list[str] = []
+        if not self._settings.enable_live_account_verification:
+            missing.append("BLUETTI_ENABLE_LIVE_ACCOUNT_VERIFICATION")
+
+        session_config = self._session_config
+        if session_config is None:
+            missing.append("configured-session")
+        else:
+            if not (session_config.access_token or session_config.refresh_token):
+                missing.append("account-token")
+
+            if not self._is_wss_url(session_config.wss_url):
+                missing.append("authenticated-wss-url")
+        return missing
+
+    async def _verify_auth_stage(self) -> LiveAccountVerificationCheck:
+        try:
+            await self._ensure_access_token()
+            return LiveAccountVerificationCheck(
+                stage="auth",
+                status="passed",
+                code="AUTH_READY",
+                message="Backend session authentication is ready for live verification.",
+            )
+        except SessionNotConfiguredError:
+            return LiveAccountVerificationCheck(
+                stage="auth",
+                status="failed",
+                code="SESSION_NOT_CONFIGURED",
+                message="Configure a BLUETTI session before running live-account verification.",
+            )
+        except AuthenticationExpiredError:
+            return LiveAccountVerificationCheck(
+                stage="auth",
+                status="failed",
+                code="AUTHENTICATION_EXPIRED",
+                message="Live-account verification could not refresh the BLUETTI session.",
+            )
+        except ApplicationRuntimeException as exc:
+            return LiveAccountVerificationCheck(
+                stage="auth",
+                status="failed",
+                code="BLUETTI_CLOUD_ERROR",
+                message="BLUETTI cloud rejected the authentication verification request.",
+                details={"upstreamCode": exc.msgCode},
+            )
+        except asyncio.TimeoutError:
+            return LiveAccountVerificationCheck(
+                stage="auth",
+                status="failed",
+                code="BLUETTI_TIMEOUT",
+                message="Authentication verification timed out while calling BLUETTI cloud.",
+            )
+        except aiohttp.ClientError:
+            return LiveAccountVerificationCheck(
+                stage="auth",
+                status="failed",
+                code="BLUETTI_CONNECTIVITY_ERROR",
+                message="Authentication verification could not reach BLUETTI cloud.",
+            )
+
+    async def _verify_devices_stage(self) -> LiveAccountVerificationCheck:
+        try:
+            payload = await self.list_devices()
+            return LiveAccountVerificationCheck(
+                stage="devices",
+                status="passed",
+                code="DEVICES_QUERIED",
+                message="Device discovery succeeded for the current live account session.",
+                details={"deviceCount": payload.count},
+            )
+        except SessionNotConfiguredError:
+            return LiveAccountVerificationCheck(
+                stage="devices",
+                status="failed",
+                code="SESSION_NOT_CONFIGURED",
+                message="Configure a BLUETTI session before running device verification.",
+            )
+        except AuthenticationExpiredError:
+            return LiveAccountVerificationCheck(
+                stage="devices",
+                status="failed",
+                code="AUTHENTICATION_EXPIRED",
+                message="Device verification failed because the BLUETTI session expired.",
+            )
+        except ApplicationRuntimeException as exc:
+            return LiveAccountVerificationCheck(
+                stage="devices",
+                status="failed",
+                code="BLUETTI_CLOUD_ERROR",
+                message="BLUETTI cloud rejected the device verification request.",
+                details={"upstreamCode": exc.msgCode},
+            )
+        except asyncio.TimeoutError:
+            return LiveAccountVerificationCheck(
+                stage="devices",
+                status="failed",
+                code="BLUETTI_TIMEOUT",
+                message="Device verification timed out while calling BLUETTI cloud.",
+            )
+        except aiohttp.ClientError:
+            return LiveAccountVerificationCheck(
+                stage="devices",
+                status="failed",
+                code="BLUETTI_CONNECTIVITY_ERROR",
+                message="Device verification could not reach BLUETTI cloud.",
+            )
+
+    def _verify_live_updates_stage(self) -> LiveAccountVerificationCheck:
+        snapshot = self._live_updates.snapshot()
+        if snapshot.status == "connected":
+            return LiveAccountVerificationCheck(
+                stage="live-updates",
+                status="passed",
+                code="LIVE_UPDATES_CONNECTED",
+                message="Live updates are connected for the authenticated session.",
+                details={"status": "connected"},
+            )
+
+        if snapshot.status == "degraded":
+            return LiveAccountVerificationCheck(
+                stage="live-updates",
+                status="failed",
+                code="LIVE_UPDATES_DEGRADED",
+                message="Live updates are degraded for the authenticated session.",
+                details={"status": "degraded", "reason": self._sanitize_text(snapshot.lastError or "unknown")},
+            )
+
+        return LiveAccountVerificationCheck(
+            stage="live-updates",
+            status="failed",
+            code="LIVE_UPDATES_UNAVAILABLE",
+            message="Live updates are unavailable for the current session.",
+            details={"status": "unavailable"},
+        )
+
+    def _sanitize_text(self, value: str) -> str:
+        sanitized = value
+        for secret in self._secret_values():
+            if not secret:
+                continue
+            sanitized = sanitized.replace(secret, "[redacted]")
+        return sanitized
+
+    def _secret_values(self) -> list[str]:
+        session_config = self._session_config
+        values = [
+            self._settings.access_token,
+            self._settings.refresh_token,
+            self._settings.oauth_client_secret,
+        ]
+        if session_config is not None:
+            values.extend(
+                [
+                    session_config.access_token,
+                    session_config.refresh_token,
+                ]
+            )
+        return [value for value in values if value]
 
     def _settings_session_config(self) -> SessionConfig | None:
         if self._settings.access_token or self._settings.refresh_token:
@@ -428,6 +616,12 @@ class BackendService:
             access_token=self._session_config.access_token,
             wss_url=self._session_config.wss_url,
         )
+
+    @staticmethod
+    def _is_wss_url(value: str | None) -> bool:
+        if not value:
+            return False
+        return urlparse(value).scheme.lower() == "wss"
 
     def _persist_session_state(self, session_config: SessionConfig) -> None:
         self._token_store.save(

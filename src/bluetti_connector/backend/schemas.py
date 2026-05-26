@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field, model_validator
 AuthMode = Literal["token", "credentials"]
 DeviceControlKind = Literal["switch", "select"]
 LiveUpdateStatus = Literal["disabled", "connecting", "connected", "degraded"]
+VerificationStage = Literal["prerequisites", "auth", "devices", "live-updates"]
+VerificationStatus = Literal["passed", "failed"]
 
 
 class SessionSetupRequest(BaseModel):
@@ -89,3 +91,16 @@ class DeviceRefreshResponse(BaseModel):
 class DeviceCommandResponse(BaseModel):
     accepted: bool
     device: DevicePayload
+
+
+class LiveAccountVerificationCheck(BaseModel):
+    stage: VerificationStage
+    status: VerificationStatus
+    code: str
+    message: str
+    details: dict[str, Any] | None = None
+
+
+class LiveAccountVerificationResponse(BaseModel):
+    ok: bool
+    checks: list[LiveAccountVerificationCheck]
