@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+import json
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..config import get_settings
@@ -21,7 +24,16 @@ INDEX_FILE = WEB_DIR / "index.html"
 def create_app() -> FastAPI:
     settings = get_settings()
     backend_service = BackendService(settings)
-    app = FastAPI(title=settings.app_name, version=__version__)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        try:
+            yield
+        finally:
+            backend_service.shutdown()
+
+    app = FastAPI(title=settings.app_name, version=__version__, lifespan=lifespan)
+    app.state.backend_service = backend_service
     install_exception_handlers(app)
 
     app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
@@ -55,6 +67,22 @@ def create_app() -> FastAPI:
     @app.get("/api/session")
     async def session_status() -> dict[str, object]:
         return backend_service.get_session_snapshot().model_dump()
+
+    @app.get("/api/live-updates")
+    async def live_updates_stream() -> StreamingResponse:
+        async def event_stream():
+            async for event in backend_service.stream_live_updates():
+                payload = {key: value for key, value in event.__dict__.items() if value is not None}
+                yield f"event: {event.eventType}\ndata: {json.dumps(payload)}\n\n"
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            },
+        )
 
     @app.post("/api/session")
     async def setup_session(payload: SessionSetupRequest) -> dict[str, object]:

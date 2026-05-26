@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
 import secrets
 import time
@@ -21,6 +21,7 @@ from ..core import (
 )
 from .auth import build_authorize_url, exchange_authorization_code, refresh_access_token
 from .errors import DeviceNotFoundError, InvalidCommandError, SessionNotConfiguredError
+from .live_updates import LiveUpdateEvent, LiveUpdatesManager
 from .schemas import (
     AuthMode,
     DeviceCommandResponse,
@@ -60,13 +61,16 @@ class PendingOAuthFlow:
 
 
 class BackendService:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, live_updates: LiveUpdatesManager | None = None) -> None:
         self._settings = settings
         self._token_store = LocalTokenStore(settings.token_store)
         self._pending_oauth_flows: dict[str, PendingOAuthFlow] = {}
+        self._live_updates = live_updates or LiveUpdatesManager()
         self._session_config = self._load_initial_session_config()
+        self._sync_live_updates()
 
     def get_session_snapshot(self) -> SessionSnapshot:
+        live_updates = self._live_updates.snapshot()
         if self._session_config is None:
             return SessionSnapshot(
                 configured=False,
@@ -80,6 +84,11 @@ class BackendService:
                     "gatewayUrl": self._settings.cloud_gateway_url,
                     "wssUrl": self._settings.cloud_wss_url,
                 },
+                liveUpdates=SessionSnapshot.LiveUpdateSnapshot(
+                    configured=live_updates.configured,
+                    status=live_updates.status,
+                    lastError=live_updates.lastError,
+                ),
             )
 
         return SessionSnapshot(
@@ -94,7 +103,23 @@ class BackendService:
                 "gatewayUrl": self._session_config.gateway_url,
                 "wssUrl": self._session_config.wss_url,
             },
+            liveUpdates=SessionSnapshot.LiveUpdateSnapshot(
+                configured=live_updates.configured,
+                status=live_updates.status,
+                lastError=live_updates.lastError,
+            ),
         )
+
+    def shutdown(self) -> None:
+        self._live_updates.shutdown()
+
+    async def stream_live_updates(self) -> AsyncIterator[LiveUpdateEvent]:
+        subscriber_id, queue = self._live_updates.subscribe()
+        try:
+            while True:
+                yield await queue.get()
+        finally:
+            self._live_updates.unsubscribe(subscriber_id)
 
     def configure_session(self, payload: SessionSetupRequest) -> SessionSnapshot:
         self._set_session_config(
@@ -339,6 +364,7 @@ class BackendService:
             refresh_token=refreshed_state.refresh_token or session_config.refresh_token,
         )
         self._persist_session_state(self._session_config)
+        self._sync_live_updates()
 
     def _set_session_config(
         self,
@@ -365,6 +391,7 @@ class BackendService:
             uses_stored_session=uses_stored_session,
         )
         self._persist_session_state(self._session_config)
+        self._sync_live_updates()
 
     def _prune_pending_oauth_flows(self) -> None:
         now = time.time()
@@ -390,6 +417,17 @@ class BackendService:
     def _invalidate_session(self) -> None:
         self._session_config = None
         self._token_store.clear()
+        self._live_updates.shutdown()
+
+    def _sync_live_updates(self) -> None:
+        if self._session_config is None:
+            self._live_updates.shutdown()
+            return
+
+        self._live_updates.configure(
+            access_token=self._session_config.access_token,
+            wss_url=self._session_config.wss_url,
+        )
 
     def _persist_session_state(self, session_config: SessionConfig) -> None:
         self._token_store.save(

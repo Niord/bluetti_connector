@@ -2,6 +2,8 @@ const state = {
   bootstrap: null,
   session: null,
   devices: [],
+  liveUpdatesSource: null,
+  liveUpdateRefreshes: new Map(),
 };
 
 const PRIORITY_STATE_CODES = [
@@ -42,6 +44,9 @@ const elements = {
   metaAccessToken: document.querySelector('#meta-access-token'),
   metaRefreshToken: document.querySelector('#meta-refresh-token'),
   metaStoredSession: document.querySelector('#meta-stored-session'),
+  metaLiveUpdates: document.querySelector('#meta-live-updates'),
+  metaLiveUpdatesDetail: document.querySelector('#meta-live-updates-detail'),
+  liveUpdatesBanner: document.querySelector('#live-updates-banner'),
 };
 
 init().catch((error) => {
@@ -52,6 +57,7 @@ async function init() {
   bindEvents();
   await loadBootstrap();
   await loadSession();
+  ensureLiveUpdatesSubscription();
   applyOauthFeedbackFromUrl();
 
   if (state.session?.configured) {
@@ -116,12 +122,8 @@ async function onDeviceGridClick(event) {
 
   try {
     if (action === 'refresh') {
-      const payload = await requestJson(`/api/devices/${encodeURIComponent(deviceSn)}/refresh`, {
-        method: 'POST',
-      });
+      const payload = await refreshDevice(deviceSn);
       await syncSessionStatus();
-      upsertDevice(payload.item);
-      renderDevices();
       feedbackNode = findDeviceFeedbackNode(deviceSn);
       setDeviceFeedback(feedbackNode, 'Device state refreshed.', 'success');
       showFeedback(elements.devicesFeedback, `Refreshed ${payload.item.name}.`, 'success');
@@ -208,6 +210,8 @@ function renderSession() {
       elements.wssUrl.value = cloud.wssUrl || '';
     }
   }
+
+  renderLiveUpdatesStatus();
 }
 
 function applyOauthFeedbackFromUrl() {
@@ -398,6 +402,175 @@ function setButtonBusy(button, busy, busyLabel) {
   }
   button.disabled = busy;
   button.textContent = busy ? busyLabel : button.dataset.idleLabel;
+}
+
+async function refreshDevice(deviceSn) {
+  const payload = await requestJson(`/api/devices/${encodeURIComponent(deviceSn)}/refresh`, {
+    method: 'POST',
+  });
+  upsertDevice(payload.item);
+  renderDevices();
+  return payload;
+}
+
+function ensureLiveUpdatesSubscription() {
+  if (state.liveUpdatesSource || typeof EventSource === 'undefined') {
+    return;
+  }
+
+  const source = new EventSource('/api/live-updates');
+  source.addEventListener('status', onLiveUpdatesStatusEvent);
+  source.addEventListener('device-update', onLiveDeviceUpdateEvent);
+  source.onerror = () => {
+    if (!state.session?.liveUpdates) {
+      return;
+    }
+    renderLiveUpdatesStatus('The local browser stream is reconnecting to the backend.');
+  };
+
+  state.liveUpdatesSource = source;
+}
+
+function onLiveUpdatesStatusEvent(event) {
+  const payload = parseLiveUpdateEvent(event);
+  if (!payload || !state.session) {
+    return;
+  }
+
+  state.session.liveUpdates = {
+    configured: payload.status !== 'disabled',
+    status: payload.status || 'disabled',
+    lastError: payload.lastError || null,
+  };
+  renderSession();
+}
+
+function onLiveDeviceUpdateEvent(event) {
+  const payload = parseLiveUpdateEvent(event);
+  if (!payload?.deviceSn) {
+    return;
+  }
+
+  void refreshDeviceFromLiveUpdate(payload.deviceSn);
+}
+
+async function refreshDeviceFromLiveUpdate(deviceSn) {
+  if (!state.devices.some((item) => item.sn === deviceSn)) {
+    return;
+  }
+
+  const pendingRefresh = state.liveUpdateRefreshes.get(deviceSn);
+  if (pendingRefresh) {
+    return pendingRefresh;
+  }
+
+  const refreshPromise = (async () => {
+    try {
+      await refreshDevice(deviceSn);
+    } catch (error) {
+      await syncSessionStatusAfterAuthError(error);
+      showFeedback(
+        elements.devicesFeedback,
+        `Live update received for ${deviceSn}, but the device refresh failed: ${formatError(error)}`,
+        'error'
+      );
+    } finally {
+      state.liveUpdateRefreshes.delete(deviceSn);
+    }
+  })();
+
+  state.liveUpdateRefreshes.set(deviceSn, refreshPromise);
+  return refreshPromise;
+}
+
+function parseLiveUpdateEvent(event) {
+  try {
+    return JSON.parse(event.data);
+  } catch {
+    return null;
+  }
+}
+
+function renderLiveUpdatesStatus(overrideMessage = null) {
+  const liveUpdates = state.session?.liveUpdates;
+
+  elements.metaLiveUpdates.textContent = formatLiveUpdatesLabel(liveUpdates);
+  elements.metaLiveUpdatesDetail.textContent = formatLiveUpdatesDetail(liveUpdates);
+
+  const bannerState = describeLiveUpdatesBanner(liveUpdates, overrideMessage);
+  elements.liveUpdatesBanner.textContent = bannerState.message;
+  elements.liveUpdatesBanner.className = `state-banner state-banner--${bannerState.tone}`;
+  elements.liveUpdatesBanner.hidden = false;
+}
+
+function formatLiveUpdatesLabel(liveUpdates) {
+  if (!liveUpdates) {
+    return 'Unknown';
+  }
+
+  if (liveUpdates.status === 'connected') {
+    return 'Connected';
+  }
+  if (liveUpdates.status === 'connecting') {
+    return 'Connecting';
+  }
+  if (liveUpdates.status === 'degraded') {
+    return 'Degraded';
+  }
+  return liveUpdates.configured ? 'Unavailable' : 'Disabled';
+}
+
+function formatLiveUpdatesDetail(liveUpdates) {
+  if (!liveUpdates?.configured) {
+    return 'Manual refresh remains available until a supported authenticated session is configured.';
+  }
+  if (liveUpdates.lastError) {
+    return liveUpdates.lastError;
+  }
+  if (liveUpdates.status === 'connected') {
+    return 'Device cards refresh automatically when the backend receives a device update.';
+  }
+  if (liveUpdates.status === 'connecting') {
+    return 'The backend is establishing live device updates.';
+  }
+  return 'Automatic refresh is currently degraded. Manual refresh remains available.';
+}
+
+function describeLiveUpdatesBanner(liveUpdates, overrideMessage) {
+  if (overrideMessage) {
+    return {
+      tone: 'info',
+      message: overrideMessage,
+    };
+  }
+
+  if (!liveUpdates?.configured) {
+    return {
+      tone: 'empty',
+      message: 'Live updates are disabled for the current session. Use Refresh all devices or per-device refresh when you need the latest state.',
+    };
+  }
+
+  if (liveUpdates.status === 'connected') {
+    return {
+      tone: 'success',
+      message: 'Live updates are active. Device cards refresh automatically when the backend receives a device update.',
+    };
+  }
+
+  if (liveUpdates.status === 'connecting') {
+    return {
+      tone: 'info',
+      message: 'The backend is connecting live device updates. Automatic refresh will start as soon as the session is ready.',
+    };
+  }
+
+  return {
+    tone: 'error',
+    message: liveUpdates.lastError
+      ? `Live updates are degraded. Manual refresh remains available. Last issue: ${liveUpdates.lastError}`
+      : 'Live updates are degraded. Manual refresh remains available until the backend reconnects.',
+  };
 }
 
 async function requestJson(url, options = {}) {

@@ -248,6 +248,11 @@ h1 {
   color: var(--info-text);
 }
 
+.state-banner--success {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
 .state-banner--error {
   background: var(--error-bg);
   color: var(--error-text);

@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 
 AuthMode = Literal["token", "credentials"]
 DeviceControlKind = Literal["switch", "select"]
+LiveUpdateStatus = Literal["disabled", "connecting", "connected", "degraded"]
 
 
 class SessionSetupRequest(BaseModel):
@@ -32,6 +33,11 @@ class DeviceCommandRequest(BaseModel):
 
 
 class SessionSnapshot(BaseModel):
+    class LiveUpdateSnapshot(BaseModel):
+        configured: bool
+        status: LiveUpdateStatus
+        lastError: str | None = None
+
     configured: bool
     source: str | None = None
     authMode: AuthMode | None = None
@@ -39,6 +45,7 @@ class SessionSnapshot(BaseModel):
     hasAccessToken: bool
     hasRefreshToken: bool = False
     cloud: dict[str, str]
+    liveUpdates: LiveUpdateSnapshot
 
 
 class DeviceStatePayload(BaseModel):

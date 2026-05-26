@@ -18,6 +18,8 @@ __LOGGER__ = logging.getLogger(__name__)
 MessageHandler = Callable[[str], None]
 ErrorHandler = Callable[[Exception], None]
 TokenExpiredHandler = Callable[[], None]
+ConnectedHandler = Callable[[], None]
+DisconnectedHandler = Callable[[], None]
 
 
 class StompClient:
@@ -28,6 +30,8 @@ class StompClient:
         handler: MessageHandler | None = None,
         on_token_expired: TokenExpiredHandler | None = None,
         on_error: ErrorHandler | None = None,
+        on_connected: ConnectedHandler | None = None,
+        on_disconnected: DisconnectedHandler | None = None,
     ) -> None:
         self._base_url = url.rstrip("/")
         self._url = f"{self._base_url}/websocket"
@@ -37,6 +41,8 @@ class StompClient:
         }
         self.on_token_expired = on_token_expired
         self.on_error = on_error
+        self.on_connected = on_connected
+        self.on_disconnected = on_disconnected
         self.listener = StompListener(self, handler)
         self.websocket: websocket.WebSocketApp | None = None
         self.running = False
@@ -123,6 +129,14 @@ class StompClient:
             return
         __LOGGER__.error("BLUETTI websocket error: %s", error)
 
+    def _handle_connected(self) -> None:
+        if self.on_connected is not None:
+            self.on_connected()
+
+    def _handle_disconnected(self) -> None:
+        if self.on_disconnected is not None:
+            self.on_disconnected()
+
 
 class StompListener:
     def __init__(self, stomp_client: StompClient, handler: MessageHandler | None = None) -> None:
@@ -182,6 +196,7 @@ class StompListener:
             )
             destination = f"/ws-subscribe/user/{frame.headers['user-name']}/notify"
             self._on_subscribe(ws, destination)
+            self.client._handle_connected()
             return
 
         if frame.cmd == "MESSAGE":
@@ -197,4 +212,5 @@ class StompListener:
             close_status_code,
             close_msg,
         )
+        self.client._handle_disconnected()
         self.client.reconnect()
