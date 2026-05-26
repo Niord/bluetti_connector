@@ -11,7 +11,10 @@
 - The live-account verification hardening slice is archived at `openspec/changes/archive/2026-05-26-harden-live-account-verification/`.
 - The standalone core surface cleanup slice is archived at `openspec/changes/archive/2026-05-26-simplify-standalone-core-surface/`.
 - The self-contained native Swift client kit slice is archived at `openspec/changes/archive/2026-05-26-add-swift-macos-client-kit/`.
-- The repository now includes the standalone core, local backend API, local web control page, refresh-capable token bootstrap, persisted token reuse, token refresh recovery, backend-owned browser OAuth start and callback flow, backend-normalized safe switch-style and select-style controls, synced main capability specs, backend-owned live updates with local SSE fan-out and UI auto-refresh, operator and development startup entrypoints, gated secret-safe live-account verification paths, and a repository-local `swift/BluettiKit` package for direct BLUETTI cloud access from Xcode macOS apps.
+- The SwiftUI menu bar sample slice is archived at `openspec/changes/archive/2026-05-26-add-swift-menubar-monitor-sample/`.
+- The Swift browser OAuth callback hardening slice is archived at `openspec/changes/archive/2026-05-26-fix-swift-oauth-main-actor-callback/`.
+- The menu bar status-item battery percentage follow-up is archived at `openspec/changes/archive/2026-05-26-show-menubar-battery-percentage/`.
+- The repository now includes the standalone core, local backend API, local web control page, refresh-capable token bootstrap, persisted token reuse, token refresh recovery, backend-owned browser OAuth start and callback flow, backend-normalized safe switch-style and select-style controls, synced main capability specs, backend-owned live updates with local SSE fan-out and UI auto-refresh, operator and development startup entrypoints, gated secret-safe live-account verification paths, a repository-local `swift/BluettiKit` package for direct BLUETTI cloud access from Xcode macOS apps, and a copyable `swift/BluettiMonitorSample` SwiftUI menu bar app sample whose browser login returns safely into the app and whose visible status item mirrors the current battery percentage.
 
 ## Active Workstreams
 - The standalone auth path now includes both manual token entry and backend-owned browser OAuth for first-time local setup.
@@ -23,6 +26,7 @@
 ## Next Workstreams
 - Extend fake-gateway and integration coverage so more end-to-end live-update behavior is verifiable without real-account dependencies.
 - Decide whether the next native Apple-platform slice should add websocket live updates or keep the first macOS app on explicit refresh plus command flows.
+- Decide whether the menu bar sample should stay a copyable reference only or be promoted into a fuller repository-owned native app target.
 
 ## Next Decisions
 - Decide whether manual token entry remains a permanent fallback after browser OAuth is live-validated.

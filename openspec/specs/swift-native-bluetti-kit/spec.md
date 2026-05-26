@@ -19,6 +19,13 @@ The Swift package SHALL let a native app start BLUETTI browser OAuth, exchange a
 - **WHEN** a BLUETTI cloud request reports token expiry and the package still holds a valid refresh token
 - **THEN** the package refreshes the session through `/oauth2/token`, persists the refreshed token state, and retries the original device operation
 
+### Requirement: Swift Package Completes Browser OAuth Callback Safely On macOS
+The Swift package SHALL keep the native BLUETTI browser OAuth session lifecycle on a callback path that is safe for a macOS app to resume without queue-assertion or callback-threading failure.
+
+#### Scenario: Browser login returns to the native app
+- **WHEN** a macOS app using the Swift package completes BLUETTI browser login and the callback URL returns to the app
+- **THEN** the package finishes the auth-session callback flow without a dispatch queue assertion and continues to token exchange or sanitized error handling
+
 ### Requirement: Swift Package Retrieves BLUETTI Devices And Current State
 The Swift package SHALL retrieve the authenticated account devices from BLUETTI cloud and SHALL return decoded device models that preserve the cloud state payload.
 

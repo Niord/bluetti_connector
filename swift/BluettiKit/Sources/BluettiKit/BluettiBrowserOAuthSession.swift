@@ -47,33 +47,51 @@ public final class BluettiBrowserOAuthSession: NSObject, ASWebAuthenticationPres
         prefersEphemeralWebBrowserSession: Bool
     ) async throws -> URL {
         try await withCheckedThrowingContinuation { continuation in
+            let completionHandler = Self.makeAuthenticationCompletionHandler(
+                continuation: continuation,
+                clearActiveSession: { [weak self] in
+                    Task { @MainActor in
+                        self?.activeSession = nil
+                    }
+                }
+            )
+
             let session = ASWebAuthenticationSession(
                 url: authorizeURL,
                 callbackURLScheme: callbackScheme
-            ) { [weak self] callbackURL, error in
-                self?.activeSession = nil
+            , completionHandler: completionHandler)
 
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
+            Task { @MainActor [weak self] in
+                session.presentationContextProvider = self
+                session.prefersEphemeralWebBrowserSession = prefersEphemeralWebBrowserSession
+                self?.activeSession = session
+
+                if !session.start() {
+                    self?.activeSession = nil
+                    continuation.resume(throwing: BluettiError.invalidResponse("Failed to start BLUETTI browser OAuth session."))
                 }
+            }
+        }
+    }
 
-                guard let callbackURL else {
-                    continuation.resume(throwing: BluettiError.invalidResponse("BLUETTI browser OAuth finished without a callback URL."))
-                    return
-                }
+    private nonisolated static func makeAuthenticationCompletionHandler(
+        continuation: CheckedContinuation<URL, any Error>,
+        clearActiveSession: @escaping @Sendable () -> Void
+    ) -> @Sendable (URL?, (any Error)?) -> Void {
+        { callbackURL, error in
+            clearActiveSession()
 
-                continuation.resume(returning: callbackURL)
+            if let error {
+                continuation.resume(throwing: error)
+                return
             }
 
-            session.presentationContextProvider = self
-            session.prefersEphemeralWebBrowserSession = prefersEphemeralWebBrowserSession
-            activeSession = session
-
-            if !session.start() {
-                activeSession = nil
-                continuation.resume(throwing: BluettiError.invalidResponse("Failed to start BLUETTI browser OAuth session."))
+            guard let callbackURL else {
+                continuation.resume(throwing: BluettiError.invalidResponse("BLUETTI browser OAuth finished without a callback URL."))
+                return
             }
+
+            continuation.resume(returning: callbackURL)
         }
     }
 }
