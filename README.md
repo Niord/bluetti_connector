@@ -16,14 +16,32 @@ Standalone BLUETTI connector under extraction from the official Home Assistant i
 
 ## Quick Start
 
+### Operator Install
+
+1. `python3 -m venv .venv`
+2. `source .venv/bin/activate`
+3. `python -m pip install --upgrade pip`
+4. `python -m pip install .`
+5. `mkdir -p ~/.config/bluetti-connector`
+6. `cp .env.example ~/.config/bluetti-connector/.env`
+7. Fill in the BLUETTI access-token or refresh-token values you want to use locally if you want startup defaults
+8. `bluetti-connector`
+9. Open `http://127.0.0.1:8080`
+
+By default, the operator runtime reads configuration from `~/.config/bluetti-connector/.env` and persists local session state at `~/.local/state/bluetti-connector/tokens.json`.
+
+### Repository Development
+
+For repository-local iteration with reload enabled:
+
 1. `python3 -m venv .venv`
 2. `source .venv/bin/activate`
 3. `python -m pip install --upgrade pip`
 4. `python -m pip install -e '.[dev]'`
 5. `cp .env.example .env`
-6. Fill in the BLUETTI access-token or refresh-token values you want to use locally if you want startup defaults
-7. `bluetti-connector-dev`
-8. Open `http://127.0.0.1:8080`
+6. `bluetti-connector-dev`
+
+The development entrypoint keeps the existing repo-local defaults: it reads `.env` from the current working directory and stores session state under `.local/state/bluetti/tokens.json` relative to that directory.
 
 The local server binds to `http://127.0.0.1:8080` by default and serves:
 
@@ -46,6 +64,13 @@ The application reads `.env` values with the `BLUETTI_` prefix. The initial boot
 - BLUETTI cloud endpoints: `BLUETTI_CLOUD_SSO_URL`, `BLUETTI_CLOUD_GATEWAY_URL`, `BLUETTI_CLOUD_WSS_URL`
 - session and refresh tokens: `BLUETTI_ACCESS_TOKEN`, `BLUETTI_REFRESH_TOKEN`, `BLUETTI_OAUTH_CLIENT_ID`, `BLUETTI_OAUTH_CLIENT_SECRET`, `BLUETTI_OAUTH_STATE_TTL_SECONDS`, `BLUETTI_TOKEN_STORE_PATH`
 - runtime behavior: `BLUETTI_REQUEST_TIMEOUT_SECONDS`
+
+Default runtime path behavior now depends on the startup mode:
+
+- `bluetti-connector`: operator defaults from `~/.config/bluetti-connector/.env` and `~/.local/state/bluetti-connector/tokens.json`
+- `bluetti-connector-dev`: development defaults from `.env` and `.local/state/bluetti/tokens.json` in the current working directory
+
+Explicit `BLUETTI_*` environment variables still override both modes.
 
 The standalone runtime currently supports direct access tokens, direct refresh tokens, backend-owned browser OAuth, or any persisted combination of those tokens. A live probe against `https://sso.bluettipower.com/oauth2/token` rejected `grant_type=password`, so direct username and password bootstrap is intentionally out of scope.
 
@@ -78,7 +103,7 @@ These checks verify backend websocket lifecycle status, the local SSE stream sur
 Use the reusable fake gateway to validate the browser flow without a real BLUETTI account:
 
 1. Start the fake gateway: `.venv/bin/python tests/fake_bluetti_gateway.py --port 18081`
-2. Start the local app: `bluetti-connector-dev`
+2. Start the local app from the repository root: `bluetti-connector-dev`
 3. Open `http://127.0.0.1:8080`
 4. Click `Load devices` before configuring a session and confirm the page shows the backend session error
 5. Fill the session form with `expired-access-token` as the access token, `test-refresh-token` as the refresh token, `http://127.0.0.1:18081` as Gateway URL, `http://127.0.0.1:18081/sso` as SSO URL, and `ws://127.0.0.1/unused` as WebSocket URL
@@ -92,7 +117,7 @@ The local session panel now also offers `Connect with BLUETTI`, which sends the 
 
 For live-account verification:
 
-1. Start the local app: `bluetti-connector-dev`
+1. Start the local app with `bluetti-connector` for operator-style runtime defaults, or `bluetti-connector-dev` from the repository root for development-mode defaults
 2. Open `http://127.0.0.1:8080`
 3. Click `Connect with BLUETTI`
 4. Complete BLUETTI login in the browser and confirm the app returns to `/` with a success message and a configured session
@@ -103,6 +128,7 @@ For live-account verification:
 Implemented in the current baseline:
 
 - standalone core extraction without `homeassistant` imports
+- operator-facing and development-facing local startup commands with deterministic default config and token-store locations
 - local backend session setup, refresh-token bootstrap, backend-owned browser OAuth start/callback flow, device listing, device refresh, safe switch-style or select-style command execution, and backend-owned live-update lifecycle management
 - backend-served local UI with loading, empty, error, richer device-state display, safe command controls, backend-owned live-update status, and automatic per-device refresh when the backend publishes sanitized device-update events
 - deterministic smoke verification against a fake BLUETTI gateway, including token refresh and retry recovery, plus focused backend and frontend regression coverage for browser OAuth, live-update status, SSE fan-out, and UI refresh behavior
@@ -111,4 +137,4 @@ Still intentionally out of scope for the first change:
 
 - automated verification against a real BLUETTI account
 - free-form numeric or text command entry for BLUETTI states that do not expose safe allowed values in the current snapshot
-- production packaging, multi-user behavior, and fake-gateway websocket simulation
+- native installers, service-manager integration, multi-user behavior, and fake-gateway websocket simulation

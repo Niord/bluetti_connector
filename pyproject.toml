@@ -29,7 +29,8 @@ dev = [
 ]
 
 [project.scripts]
-bluetti-connector-dev = "bluetti_connector.cli:main"
+bluetti-connector = "bluetti_connector.cli:main"
+bluetti-connector-dev = "bluetti_connector.cli:dev_main"
 
 [tool.hatch.build]
 include = [
