@@ -88,6 +88,14 @@ Run the deterministic smoke checks for the extracted core and backend:
 
 These checks use a fake BLUETTI gateway that preserves the first-pass upstream response envelope while verifying device discovery, refresh, richer device payloads, and safe command execution.
 
+Run the focused repository hygiene check for the standalone Python surface:
+
+```bash
+.venv/bin/python -m ruff check src/bluetti_connector tests
+```
+
+This check keeps the focused backend or core regression harness aligned with the repository's declared Python support contract and catches cleanup regressions that do not immediately surface through smoke behavior.
+
 ### Focused Live Update Checks
 
 Run the focused backend and frontend regression checks for backend-owned live updates:

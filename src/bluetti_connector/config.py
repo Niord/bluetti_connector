@@ -5,10 +5,7 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .runtime_paths import RuntimeProfile, resolve_development_runtime_paths, resolve_operator_runtime_paths, resolve_runtime_profile
-
-
-DEVELOPMENT_RUNTIME_PATHS = resolve_development_runtime_paths()
+from .runtime_paths import RuntimePaths, RuntimeProfile, resolve_development_runtime_paths, resolve_operator_runtime_paths, resolve_runtime_profile
 
 
 class Settings(BaseSettings):
@@ -42,9 +39,7 @@ class Settings(BaseSettings):
     def token_store(self) -> Path:
         if self.token_store_path:
             return Path(self.token_store_path)
-        if self.runtime_profile is RuntimeProfile.OPERATOR:
-            return resolve_operator_runtime_paths().token_store
-        return DEVELOPMENT_RUNTIME_PATHS.token_store
+        return _resolve_runtime_paths(self.runtime_profile).token_store
 
     @property
     def has_tokens(self) -> bool:
@@ -63,12 +58,15 @@ def get_operator_settings() -> Settings:
     return _get_settings_for_profile(RuntimeProfile.OPERATOR)
 
 
+def _resolve_runtime_paths(profile: RuntimeProfile) -> RuntimePaths:
+    if profile is RuntimeProfile.DEVELOPMENT:
+        return resolve_development_runtime_paths()
+    return resolve_operator_runtime_paths()
+
+
 @lru_cache(maxsize=2)
 def _get_settings_for_profile(profile: RuntimeProfile) -> Settings:
-    if profile is RuntimeProfile.DEVELOPMENT:
-        runtime_paths = DEVELOPMENT_RUNTIME_PATHS
-    else:
-        runtime_paths = resolve_operator_runtime_paths()
+    runtime_paths = _resolve_runtime_paths(profile)
 
     return Settings(
         _env_file=str(runtime_paths.env_file),

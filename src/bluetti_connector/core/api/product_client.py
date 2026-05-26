@@ -11,11 +11,11 @@ from ..const import Method
 from ..model.product import UserProduct
 from ..profile.application_profile import ApplicationProfile
 
+__LOGGER__ = logging.getLogger(f"{__name__}.ProductClient")
+
 
 class ProductClient(Bluetti):
     """Standalone BLUETTI products client."""
-
-    __LOGGER__: logging.Logger | None = None
 
     def __init__(
         self,
@@ -35,9 +35,7 @@ class ProductClient(Bluetti):
 
     @property
     def logger(self) -> logging.Logger:
-        if self.__LOGGER__ is None:
-            self.__LOGGER__ = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
-        return self.__LOGGER__
+        return __LOGGER__
 
     async def get_user_products(self) -> UnifyResponse[list[UserProduct]]:
         return await self._request(

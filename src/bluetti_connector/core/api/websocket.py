@@ -130,6 +130,7 @@ class StompClient:
         __LOGGER__.error("BLUETTI websocket error: %s", error)
 
     def _handle_connected(self) -> None:
+        self.reconnect_delay = 1
         if self.on_connected is not None:
             self.on_connected()
 

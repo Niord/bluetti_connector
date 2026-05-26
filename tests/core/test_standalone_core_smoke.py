@@ -109,7 +109,7 @@ async def test_standalone_core_smoke_flow(fake_bluetti_gateway: tuple[str, dict[
         "server": {
             "sso": f"{base_url}/sso",
             "gateway": base_url,
-            "wss": f"ws://127.0.0.1/unused",
+            "wss": "ws://127.0.0.1/unused",
         }
     }
 

@@ -10,7 +10,7 @@ from bluetti_connector.backend.app import create_app
 
 
 async def _read_one_sse_event(response) -> tuple[str, dict[str, object]]:
-    chunk = await asyncio.wait_for(anext(response.body_iterator), timeout=1)
+    chunk = await asyncio.wait_for(response.body_iterator.__anext__(), timeout=1)
     lines = [line for line in chunk.splitlines() if line]
 
     event_name = next(line.split(": ", 1)[1] for line in lines if line.startswith("event: "))

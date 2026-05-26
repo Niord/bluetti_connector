@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from json import dumps
 from typing import Any, Callable, Generic, TypeVar
 
@@ -17,7 +17,7 @@ T = TypeVar("T")
 TokenExpiredHandler = Callable[[], None]
 
 
-class Bluetti(Generic[T]):
+class Bluetti(Generic[T], ABC):
     _accessToken: str | None = None
     _httpSession: aiohttp.ClientSession
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 import secrets
 import time
@@ -35,7 +36,7 @@ from .schemas import (
     SessionSnapshot,
     SessionSetupRequest,
 )
-from .token_store import LocalTokenStore, StoredSessionState
+from .token_store import LocalTokenStore
 
 
 T = TypeVar("T")
@@ -252,96 +253,90 @@ class BackendService:
         return missing
 
     async def _verify_auth_stage(self) -> LiveAccountVerificationCheck:
-        try:
-            await self._ensure_access_token()
-            return LiveAccountVerificationCheck(
-                stage="auth",
-                status="passed",
-                code="AUTH_READY",
-                message="Backend session authentication is ready for live verification.",
-            )
-        except SessionNotConfiguredError:
-            return LiveAccountVerificationCheck(
-                stage="auth",
-                status="failed",
-                code="SESSION_NOT_CONFIGURED",
-                message="Configure a BLUETTI session before running live-account verification.",
-            )
-        except AuthenticationExpiredError:
-            return LiveAccountVerificationCheck(
-                stage="auth",
-                status="failed",
-                code="AUTHENTICATION_EXPIRED",
-                message="Live-account verification could not refresh the BLUETTI session.",
-            )
-        except ApplicationRuntimeException as exc:
-            return LiveAccountVerificationCheck(
-                stage="auth",
-                status="failed",
-                code="BLUETTI_CLOUD_ERROR",
-                message="BLUETTI cloud rejected the authentication verification request.",
-                details={"upstreamCode": exc.msgCode},
-            )
-        except asyncio.TimeoutError:
-            return LiveAccountVerificationCheck(
-                stage="auth",
-                status="failed",
-                code="BLUETTI_TIMEOUT",
-                message="Authentication verification timed out while calling BLUETTI cloud.",
-            )
-        except aiohttp.ClientError:
-            return LiveAccountVerificationCheck(
-                stage="auth",
-                status="failed",
-                code="BLUETTI_CONNECTIVITY_ERROR",
-                message="Authentication verification could not reach BLUETTI cloud.",
-            )
+        return await self._verify_stage(
+            stage="auth",
+            operation=self._ensure_access_token,
+            success_code="AUTH_READY",
+            success_message="Backend session authentication is ready for live verification.",
+            not_configured_message="Configure a BLUETTI session before running live-account verification.",
+            expired_message="Live-account verification could not refresh the BLUETTI session.",
+            cloud_error_message="BLUETTI cloud rejected the authentication verification request.",
+            timeout_message="Authentication verification timed out while calling BLUETTI cloud.",
+            connectivity_message="Authentication verification could not reach BLUETTI cloud.",
+        )
 
     async def _verify_devices_stage(self) -> LiveAccountVerificationCheck:
+        return await self._verify_stage(
+            stage="devices",
+            operation=self.list_devices,
+            success_code="DEVICES_QUERIED",
+            success_message="Device discovery succeeded for the current live account session.",
+            not_configured_message="Configure a BLUETTI session before running device verification.",
+            expired_message="Device verification failed because the BLUETTI session expired.",
+            cloud_error_message="BLUETTI cloud rejected the device verification request.",
+            timeout_message="Device verification timed out while calling BLUETTI cloud.",
+            connectivity_message="Device verification could not reach BLUETTI cloud.",
+            success_details=lambda payload: {"deviceCount": payload.count},
+        )
+
+    async def _verify_stage(
+        self,
+        *,
+        stage: str,
+        operation: Callable[[], Awaitable[T]],
+        success_code: str,
+        success_message: str,
+        not_configured_message: str,
+        expired_message: str,
+        cloud_error_message: str,
+        timeout_message: str,
+        connectivity_message: str,
+        success_details: Callable[[T], dict[str, object]] | None = None,
+    ) -> LiveAccountVerificationCheck:
         try:
-            payload = await self.list_devices()
+            result = await operation()
             return LiveAccountVerificationCheck(
-                stage="devices",
+                stage=stage,
                 status="passed",
-                code="DEVICES_QUERIED",
-                message="Device discovery succeeded for the current live account session.",
-                details={"deviceCount": payload.count},
+                code=success_code,
+                message=success_message,
+                details=success_details(result) if success_details is not None else None,
             )
         except SessionNotConfiguredError:
             return LiveAccountVerificationCheck(
-                stage="devices",
+                stage=stage,
                 status="failed",
                 code="SESSION_NOT_CONFIGURED",
-                message="Configure a BLUETTI session before running device verification.",
+                message=not_configured_message,
             )
         except AuthenticationExpiredError:
             return LiveAccountVerificationCheck(
-                stage="devices",
+                stage=stage,
                 status="failed",
                 code="AUTHENTICATION_EXPIRED",
-                message="Device verification failed because the BLUETTI session expired.",
+                message=expired_message,
             )
         except ApplicationRuntimeException as exc:
             return LiveAccountVerificationCheck(
-                stage="devices",
+                stage=stage,
                 status="failed",
                 code="BLUETTI_CLOUD_ERROR",
-                message="BLUETTI cloud rejected the device verification request.",
+                message=cloud_error_message,
                 details={"upstreamCode": exc.msgCode},
             )
         except asyncio.TimeoutError:
             return LiveAccountVerificationCheck(
-                stage="devices",
+                stage=stage,
                 status="failed",
                 code="BLUETTI_TIMEOUT",
-                message="Device verification timed out while calling BLUETTI cloud.",
+                message=timeout_message,
             )
         except aiohttp.ClientError:
             return LiveAccountVerificationCheck(
-                stage="devices",
+                stage=stage,
                 status="failed",
                 code="BLUETTI_CONNECTIVITY_ERROR",
-                message="Device verification could not reach BLUETTI cloud.",
+                message=connectivity_message,
             )
 
     def _verify_live_updates_stage(self) -> LiveAccountVerificationCheck:
@@ -468,19 +463,7 @@ class BackendService:
             device.on_line = status_device.on_line or device.on_line
             device.name = status_device.name or device.name
             device.model = status_device.model or device.model
-            device._merge_states(
-                [
-                    {
-                        "fnCode": state.fn_code,
-                        "fnName": state.fn_name,
-                        "fnValue": state.fn_value,
-                        "fnType": state.fn_type,
-                        "supportModeValues": state.support_mode_values,
-                        "sensorInfo": state.sensor_info,
-                    }
-                    for state in status_device.states
-                ]
-            )
+            device.merge_states(status_device.states)
 
         device.api_client = client
         return device
@@ -680,25 +663,13 @@ class BackendService:
             control=control,
         )
 
-    def _product_client(self):
-        return _ProductClientContext(self)
-
-
-class _ProductClientContext:
-    def __init__(self, service: BackendService) -> None:
-        self._service = service
-        self._session: aiohttp.ClientSession | None = None
-
-    async def __aenter__(self) -> ProductClient:
-        session_config = self._service._require_session_config()
-        self._session = aiohttp.ClientSession()
-        return ProductClient(
-            httpSession=self._session,
-            accessToken=session_config.access_token,
-            application_profile=self._service._create_profile(),
-            request_timeout_seconds=self._service._settings.request_timeout_seconds,
-        )
-
-    async def __aexit__(self, exc_type, exc, tb) -> None:
-        if self._session is not None:
-            await self._session.close()
+    @asynccontextmanager
+    async def _product_client(self) -> AsyncIterator[ProductClient]:
+        session_config = self._require_session_config()
+        async with aiohttp.ClientSession() as session:
+            yield ProductClient(
+                httpSession=session,
+                accessToken=session_config.access_token,
+                application_profile=self._create_profile(),
+                request_timeout_seconds=self._settings.request_timeout_seconds,
+            )

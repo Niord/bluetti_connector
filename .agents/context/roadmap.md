@@ -9,6 +9,7 @@
 - The backend-owned websocket device updates slice is archived at `openspec/changes/archive/2026-05-26-add-websocket-device-updates/`.
 - The local operator runtime packaging slice is archived at `openspec/changes/archive/2026-05-26-package-local-operator-runtime/`.
 - The live-account verification hardening slice is archived at `openspec/changes/archive/2026-05-26-harden-live-account-verification/`.
+- The standalone core surface cleanup slice is archived at `openspec/changes/archive/2026-05-26-simplify-standalone-core-surface/`.
 - The repository now includes the standalone core, local backend API, local web control page, refresh-capable token bootstrap, persisted token reuse, token refresh recovery, backend-owned browser OAuth start and callback flow, backend-normalized safe switch-style and select-style controls, synced main capability specs, backend-owned live updates with local SSE fan-out and UI auto-refresh, operator and development startup entrypoints, and gated secret-safe live-account verification paths.
 
 ## Active Workstreams

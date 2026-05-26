@@ -1,18 +1,11 @@
 from __future__ import annotations
 
-import asyncio
-import json
-import logging
-from typing import Any, Callable, Iterable, Literal
+from typing import Any, Iterable, Literal
 
 from .application_exception import ApplicationRuntimeException
 from .const import MANUFACTURER
 from .model.product import UserProduct
 
-__LOGGER__ = logging.getLogger(__name__)
-
-StateCallback = Callable[[], None]
-DeviceUnboundHandler = Callable[["BluettiDevice"], None]
 StateControlKind = Literal["switch", "select"]
 
 
@@ -22,18 +15,8 @@ class BluettiData:
     def __init__(
         self,
         devices: Iterable[UserProduct | dict[str, Any]] | None = None,
-        loop: asyncio.AbstractEventLoop | None = None,
-        on_device_unbound: DeviceUnboundHandler | None = None,
     ) -> None:
-        self.loop = loop
-        self.devices = [
-            BluettiDevice.from_product(device, loop=loop, on_device_unbound=on_device_unbound)
-            for device in devices or []
-        ]
-
-    async def test_connection(self) -> bool:
-        await asyncio.sleep(0.1)
-        return True
+        self.devices = [BluettiDevice.from_product(device) for device in devices or []]
 
     def get_device_by_sn(self, sn: str) -> "BluettiDevice | None":
         for device in self.devices:
@@ -45,23 +28,29 @@ class BluettiData:
         for device in self.devices:
             device.api_client = api_client
 
-    def web_socket_message_handler(self, message: str) -> None:
-        __LOGGER__.debug("Received websocket payload %s", message)
-        payload = json.loads(message)
-        sn = payload.get("data", {}).get("deviceSn")
-        if not sn:
-            return
-
-        device = self.get_device_by_sn(sn)
-        if device is None:
-            return
-
-        loop = self.loop or device.loop
-        if loop and loop.is_running():
-            asyncio.run_coroutine_threadsafe(device.async_update(), loop)
-
 
 class BluettiState:
+    @classmethod
+    def from_payload(cls, payload: "BluettiState | dict[str, Any]") -> "BluettiState":
+        if isinstance(payload, BluettiState):
+            return cls(
+                fn_code=payload.fn_code,
+                fn_name=payload.fn_name,
+                fn_value=payload.fn_value,
+                fn_type=payload.fn_type,
+                support_mode_values=payload.support_mode_values,
+                sensor_info=payload.sensor_info,
+            )
+
+        return cls(
+            fn_code=payload.get("fnCode"),
+            fn_name=payload.get("fnName") or "",
+            fn_value=payload.get("fnValue"),
+            fn_type=payload.get("fnType"),
+            support_mode_values=payload.get("supportModeValues"),
+            sensor_info=payload.get("sensorInfo"),
+        )
+
     def __init__(
         self,
         fn_code: str,
@@ -121,6 +110,13 @@ class BluettiState:
         self.validate_value(value)
         self.fn_value = value
 
+    def merge(self, state: "BluettiState") -> None:
+        self.fn_value = state.fn_value
+        self.fn_name = state.fn_name or self.fn_name
+        self.fn_type = state.fn_type or self.fn_type
+        self.support_mode_values = state.support_mode_values or self.support_mode_values
+        self.sensor_info = state.sensor_info or self.sensor_info
+
     def get_name_for_value(self) -> str:
         for option in self.allowed_values():
             if option["value"] == self.fn_value:
@@ -142,9 +138,7 @@ class BluettiDevice:
         sn: str,
         model: str | None,
         state_list: list[dict[str, Any]] | None = None,
-        loop: asyncio.AbstractEventLoop | None = None,
         api_client: Any | None = None,
-        on_device_unbound: DeviceUnboundHandler | None = None,
     ) -> None:
         self.device_id = device_id
         self.on_line = on_line
@@ -152,30 +146,14 @@ class BluettiDevice:
         self.sn = sn
         self.model = model
         self.manufacturer = MANUFACTURER
-        self.loop = loop
-        self._callbacks: set[StateCallback] = set()
         self._api_client = api_client
-        self._on_device_unbound = on_device_unbound
-        self._unbind_processed = False
-        self.states = [
-            BluettiState(
-                fn_code=state.get("fnCode"),
-                fn_name=state.get("fnName") or "",
-                fn_value=state.get("fnValue"),
-                fn_type=state.get("fnType"),
-                support_mode_values=state.get("supportModeValues"),
-                sensor_info=state.get("sensorInfo"),
-            )
-            for state in state_list or []
-        ]
+        self.states = [BluettiState.from_payload(state) for state in state_list or []]
 
     @classmethod
     def from_product(
         cls,
         product: UserProduct | dict[str, Any],
-        loop: asyncio.AbstractEventLoop | None = None,
         api_client: Any | None = None,
-        on_device_unbound: DeviceUnboundHandler | None = None,
     ) -> "BluettiDevice":
         product_model = product if isinstance(product, UserProduct) else UserProduct.model_validate(product)
         return cls(
@@ -185,9 +163,7 @@ class BluettiDevice:
             sn=product_model.sn,
             model=product_model.model,
             state_list=product_model.stateList or [],
-            loop=loop,
             api_client=api_client,
-            on_device_unbound=on_device_unbound,
         )
 
     @property
@@ -223,17 +199,6 @@ class BluettiDevice:
             raise ApplicationRuntimeException(msgCode=result.msgCode, data=result.data)
 
         state.set_value(value)
-        await self.publish_updates()
-
-    def register_callback(self, callback: StateCallback) -> None:
-        self._callbacks.add(callback)
-
-    def remove_callback(self, callback: StateCallback) -> None:
-        self._callbacks.discard(callback)
-
-    async def publish_updates(self) -> None:
-        for callback in self._callbacks:
-            callback()
 
     @property
     def online(self) -> bool:
@@ -259,39 +224,17 @@ class BluettiDevice:
             return
 
         if data.isBindByCurUser == "0":
-            self._handle_unbind()
             return
 
         self.on_line = data.online
-        self._merge_states(data.stateList or [])
-        await self.publish_updates()
+        self.merge_states(data.stateList or [])
 
-    def _merge_states(self, state_list: list[dict[str, Any]]) -> None:
-        for new_state in state_list:
-            existing = self.get_state(new_state["fnCode"])
+    def merge_states(self, state_list: Iterable[BluettiState | dict[str, Any]]) -> None:
+        for payload in state_list:
+            new_state = BluettiState.from_payload(payload)
+            existing = self.get_state(new_state.fn_code)
             if existing is not None:
-                existing.fn_value = new_state["fnValue"]
-                existing.fn_name = new_state.get("fnName") or existing.fn_name
-                existing.fn_type = new_state.get("fnType") or existing.fn_type
-                existing.support_mode_values = new_state.get("supportModeValues") or existing.support_mode_values
-                existing.sensor_info = new_state.get("sensorInfo") or existing.sensor_info
+                existing.merge(new_state)
                 continue
 
-            self.states.append(
-                BluettiState(
-                    fn_code=new_state.get("fnCode"),
-                    fn_name=new_state.get("fnName") or "",
-                    fn_value=new_state.get("fnValue"),
-                    fn_type=new_state.get("fnType"),
-                    support_mode_values=new_state.get("supportModeValues"),
-                    sensor_info=new_state.get("sensorInfo"),
-                )
-            )
-
-    def _handle_unbind(self) -> None:
-        if self._unbind_processed:
-            return
-        self._unbind_processed = True
-        __LOGGER__.info("Detected device unbinding: %s (%s)", self.name, self.device_id)
-        if self._on_device_unbound is not None:
-            self._on_device_unbound(self)
+            self.states.append(new_state)

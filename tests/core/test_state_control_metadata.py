@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from bluetti_connector.core.models import BluettiState
+from bluetti_connector.core.models import BluettiDevice, BluettiState
 
 
 def test_state_marks_telemetry_as_read_only() -> None:
@@ -70,3 +70,48 @@ def test_state_validates_select_values_against_allowed_options() -> None:
 
     with pytest.raises(ValueError, match="Invalid value"):
         state.validate_value("workmode_invalid")
+
+
+def test_device_merge_states_accepts_typed_state_objects() -> None:
+    device = BluettiDevice(
+        device_id="AC300-TEST-001",
+        on_line="0",
+        name="Workshop Battery",
+        sn="AC300-TEST-001",
+        model="AC300",
+        state_list=[
+            {
+                "fnCode": "SOC",
+                "fnName": "Battery SOC",
+                "fnValue": "55",
+                "fnType": "number",
+                "supportModeValues": [],
+                "sensorInfo": {"unit": "%"},
+            }
+        ],
+    )
+
+    device.merge_states(
+        [
+            BluettiState(
+                fn_code="SOC",
+                fn_name="Battery SOC",
+                fn_value="61",
+                fn_type="number",
+                support_mode_values=[],
+                sensor_info={"unit": "%"},
+            ),
+            BluettiState(
+                fn_code="SetCtrlAc",
+                fn_name="AC Output",
+                fn_value="1",
+                fn_type="switch",
+                support_mode_values=[],
+                sensor_info={},
+            ),
+        ]
+    )
+
+    assert device.battery_level == 61
+    assert device.get_state("SetCtrlAc") is not None
+    assert device.get_state("SetCtrlAc").fn_value == "1"

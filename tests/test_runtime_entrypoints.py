@@ -5,7 +5,7 @@ from pathlib import Path
 
 from bluetti_connector.cli import dev_main, main
 from bluetti_connector.config import get_dev_settings, get_operator_settings, get_settings
-from bluetti_connector.runtime_paths import RUNTIME_PROFILE_ENV_VAR
+from bluetti_connector.runtime_paths import RUNTIME_PROFILE_ENV_VAR, RuntimePaths
 
 
 def test_get_settings_uses_operator_runtime_defaults(monkeypatch, tmp_path: Path) -> None:
@@ -40,6 +40,35 @@ def test_get_settings_uses_development_profile_defaults(monkeypatch, tmp_path: P
     assert settings.server_port == 9191
     assert settings.dev_reload is True
     assert settings.token_store.resolve() == tmp_path / ".local" / "state" / "bluetti" / "tokens.json"
+
+
+def test_get_dev_settings_resolves_runtime_paths_when_building_settings(monkeypatch, tmp_path: Path) -> None:
+    runtime_paths = RuntimePaths(
+        env_file=tmp_path / "runtime-a" / ".env",
+        token_store=tmp_path / "runtime-a" / "tokens.json",
+    )
+    runtime_paths.env_file.parent.mkdir(parents=True)
+    runtime_paths.env_file.write_text("BLUETTI_SERVER_PORT=9393\n")
+
+    call_count = 0
+
+    def fake_resolve_development_runtime_paths() -> RuntimePaths:
+        nonlocal call_count
+        call_count += 1
+        return runtime_paths
+
+    get_dev_settings.cache_clear()
+    monkeypatch.setattr(
+        "bluetti_connector.config.resolve_development_runtime_paths",
+        fake_resolve_development_runtime_paths,
+    )
+
+    settings = get_dev_settings()
+
+    assert call_count == 1
+    assert settings.server_port == 9393
+    assert settings.token_store == runtime_paths.token_store
+    assert call_count == 2
 
 
 def test_main_uses_operator_profile(monkeypatch) -> None:
