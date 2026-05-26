@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 AuthMode = Literal["token", "credentials"]
+DeviceControlKind = Literal["switch", "select"]
 
 
 class SessionSetupRequest(BaseModel):
@@ -41,12 +42,21 @@ class SessionSnapshot(BaseModel):
 
 
 class DeviceStatePayload(BaseModel):
+    class ControlOption(BaseModel):
+        value: str
+        label: str
+
+    class ControlPayload(BaseModel):
+        kind: DeviceControlKind
+        allowedValues: list["DeviceStatePayload.ControlOption"]
+
     fnCode: str
     fnName: str
     fnValue: str | None
     fnType: str | None
     displayValue: str
     sensorInfo: dict[str, Any]
+    control: ControlPayload | None = None
 
 
 class DevicePayload(BaseModel):

@@ -14,6 +14,7 @@ from bluetti_connector.backend.app import create_app
 
 DEVICE_SN = "AC200L-TEST-001"
 CONTROL_CODE = "AC_OUTPUT_ON"
+SELECT_CONTROL_CODE = "SetCtrlWorkMode"
 
 
 @pytest.fixture
@@ -39,6 +40,16 @@ async def fake_bluetti_gateway() -> AsyncIterator[tuple[str, dict[str, Any]]]:
                     "fnValue": "55",
                     "fnType": "number",
                     "supportModeValues": [],
+                },
+                {
+                    "fnCode": SELECT_CONTROL_CODE,
+                    "fnName": "Working mode",
+                    "fnValue": "workmode_1",
+                    "fnType": "select",
+                    "supportModeValues": [
+                        {"code": "workmode_1", "name": "Standard UPS"},
+                        {"code": "workmode_2", "name": "Time Control UPS"},
+                    ],
                 },
             ],
         },
@@ -256,6 +267,49 @@ async def test_backend_returns_sanitized_errors() -> None:
 
 
 @pytest.mark.asyncio
+async def test_backend_exposes_control_metadata_for_supported_states(
+    fake_bluetti_gateway: tuple[str, dict[str, Any]],
+) -> None:
+    base_url, _state = fake_bluetti_gateway
+    app = create_app()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        session_response = await client.post(
+            "/api/session",
+            json={
+                "accessToken": "test-access-token",
+                "ssoUrl": f"{base_url}/sso",
+                "gatewayUrl": base_url,
+                "wssUrl": "ws://127.0.0.1/unused",
+            },
+        )
+        assert session_response.status_code == 200
+
+        devices_response = await client.get("/api/devices")
+
+    assert devices_response.status_code == 200
+    states = {item["fnCode"]: item for item in devices_response.json()["items"][0]["states"]}
+    assert states[CONTROL_CODE]["displayValue"] == "Off"
+    assert states[CONTROL_CODE]["control"] == {
+        "kind": "switch",
+        "allowedValues": [
+            {"value": "0", "label": "Off"},
+            {"value": "1", "label": "On"},
+        ],
+    }
+    assert states["SOC"]["displayValue"] == "55"
+    assert states["SOC"]["control"] is None
+    assert states[SELECT_CONTROL_CODE]["displayValue"] == "Standard UPS"
+    assert states[SELECT_CONTROL_CODE]["control"] == {
+        "kind": "select",
+        "allowedValues": [
+            {"value": "workmode_1", "label": "Standard UPS"},
+            {"value": "workmode_2", "label": "Time Control UPS"},
+        ],
+    }
+
+
+@pytest.mark.asyncio
 async def test_backend_bootstraps_from_refresh_token_only(
     fake_bluetti_gateway: tuple[str, dict[str, Any]],
     tmp_path,
@@ -402,3 +456,93 @@ async def test_backend_binds_device_before_command_when_status_reports_unbound(
     assert command_response.json()["accepted"] is True
     assert state["bind_requests"] == [{"bindSnList": [DEVICE_SN]}]
     assert state["last_control"] == {"sn": DEVICE_SN, "fnCode": CONTROL_CODE, "fnValue": "1"}
+
+
+@pytest.mark.asyncio
+async def test_backend_executes_select_style_commands(
+    fake_bluetti_gateway: tuple[str, dict[str, Any]],
+) -> None:
+    base_url, state = fake_bluetti_gateway
+    app = create_app()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        session_response = await client.post(
+            "/api/session",
+            json={
+                "accessToken": "test-access-token",
+                "ssoUrl": f"{base_url}/sso",
+                "gatewayUrl": base_url,
+                "wssUrl": "ws://127.0.0.1/unused",
+            },
+        )
+        assert session_response.status_code == 200
+
+        command_response = await client.post(
+            f"/api/devices/{DEVICE_SN}/commands",
+            json={"fnCode": SELECT_CONTROL_CODE, "fnValue": "workmode_2"},
+        )
+
+    assert command_response.status_code == 200
+    assert command_response.json()["accepted"] is True
+    assert state["last_control"] == {"sn": DEVICE_SN, "fnCode": SELECT_CONTROL_CODE, "fnValue": "workmode_2"}
+    returned_states = {item["fnCode"]: item for item in command_response.json()["device"]["states"]}
+    assert returned_states[SELECT_CONTROL_CODE]["fnValue"] == "workmode_2"
+    assert returned_states[SELECT_CONTROL_CODE]["displayValue"] == "Time Control UPS"
+
+
+@pytest.mark.asyncio
+async def test_backend_rejects_invalid_select_values(
+    fake_bluetti_gateway: tuple[str, dict[str, Any]],
+) -> None:
+    base_url, state = fake_bluetti_gateway
+    app = create_app()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        session_response = await client.post(
+            "/api/session",
+            json={
+                "accessToken": "test-access-token",
+                "ssoUrl": f"{base_url}/sso",
+                "gatewayUrl": base_url,
+                "wssUrl": "ws://127.0.0.1/unused",
+            },
+        )
+        assert session_response.status_code == 200
+
+        command_response = await client.post(
+            f"/api/devices/{DEVICE_SN}/commands",
+            json={"fnCode": SELECT_CONTROL_CODE, "fnValue": "workmode_invalid"},
+        )
+
+    assert command_response.status_code == 400
+    assert command_response.json()["error"]["code"] == "INVALID_COMMAND"
+    assert state["last_control"] is None
+
+
+@pytest.mark.asyncio
+async def test_backend_rejects_read_only_state_commands(
+    fake_bluetti_gateway: tuple[str, dict[str, Any]],
+) -> None:
+    base_url, state = fake_bluetti_gateway
+    app = create_app()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        session_response = await client.post(
+            "/api/session",
+            json={
+                "accessToken": "test-access-token",
+                "ssoUrl": f"{base_url}/sso",
+                "gatewayUrl": base_url,
+                "wssUrl": "ws://127.0.0.1/unused",
+            },
+        )
+        assert session_response.status_code == 200
+
+        command_response = await client.post(
+            f"/api/devices/{DEVICE_SN}/commands",
+            json={"fnCode": "SOC", "fnValue": "42"},
+        )
+
+    assert command_response.status_code == 400
+    assert command_response.json()["error"]["code"] == "INVALID_COMMAND"
+    assert state["last_control"] is None

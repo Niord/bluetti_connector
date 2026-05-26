@@ -128,14 +128,12 @@ async function onDeviceGridClick(event) {
       return;
     }
 
-    if (action === 'toggle') {
+    if (action === 'toggle' || action === 'select') {
+      const commandRequest = buildCommandRequest(actionButton);
       const payload = await requestJson(`/api/devices/${encodeURIComponent(deviceSn)}/commands`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fnCode: actionButton.dataset.fnCode,
-          fnValue: actionButton.dataset.nextValue,
-        }),
+        body: JSON.stringify(commandRequest),
       });
       await syncSessionStatus();
       upsertDevice(payload.device);
@@ -272,10 +270,6 @@ function buildDeviceCard(device) {
   card.className = 'device-card';
   card.dataset.deviceCard = device.sn;
 
-  const switchStates = device.states.filter((stateItem) => {
-    return typeof stateItem.fnType === 'string' && stateItem.fnType.toLowerCase().includes('switch');
-  });
-
   const visibleStates = selectVisibleStates(device.states);
   const stateRows = visibleStates.map((stateItem) => {
     return `
@@ -286,25 +280,8 @@ function buildDeviceCard(device) {
     `;
   }).join('');
 
-  const actionButtons = switchStates.length === 0
-    ? '<span class="summary-chip">No switch actions exposed yet</span>'
-    : switchStates.map((stateItem, index) => {
-        const isOn = stateItem.fnValue === '1';
-        const nextValue = isOn ? '0' : '1';
-        const idleLabel = `${isOn ? 'Turn off' : 'Turn on'} ${stateItem.fnName || stateItem.fnCode}`;
-        return `
-          <button
-            type="button"
-            class="button ${isOn ? 'button--danger' : 'button--action'}"
-            data-action="toggle"
-            data-device-sn="${escapeHtml(device.sn)}"
-            data-fn-code="${escapeHtml(stateItem.fnCode)}"
-            data-next-value="${nextValue}"
-            data-idle-label="${escapeHtml(idleLabel)}"
-            data-testid="device-command-${index}"
-          >${escapeHtml(idleLabel)}</button>
-        `;
-      }).join('');
+  const controlStates = device.states.filter(isCommandCapableState);
+  const controlMarkup = buildControlMarkup(device, controlStates);
 
   card.innerHTML = `
     <div class="device-card__header">
@@ -320,7 +297,7 @@ function buildDeviceCard(device) {
         <span class="summary-chip">${escapeHtml(device.manufacturer)}</span>
       </div>
       <div class="state-list">${stateRows}</div>
-      <div class="device-actions">${actionButtons}</div>
+      <div class="device-controls">${controlMarkup}</div>
       <div class="device-footer">
         <div class="device-feedback" aria-live="polite"></div>
         <button type="button" class="button button--ghost" data-action="refresh" data-device-sn="${escapeHtml(device.sn)}" data-idle-label="Refresh device">Refresh device</button>
@@ -447,6 +424,104 @@ function emptyToNull(value) {
   return trimmed.length === 0 ? null : trimmed;
 }
 
+function buildCommandRequest(actionButton) {
+  if (actionButton.dataset.action === 'toggle') {
+    return {
+      fnCode: actionButton.dataset.fnCode,
+      fnValue: actionButton.dataset.nextValue,
+    };
+  }
+
+  const controlNode = actionButton.closest('[data-control-state]');
+  const selectInput = controlNode?.querySelector('select[data-select-control]');
+  if (!selectInput) {
+    throw new Error('The selected control is unavailable in the current device card. Refresh the device and try again.');
+  }
+
+  return {
+    fnCode: actionButton.dataset.fnCode,
+    fnValue: selectInput.value,
+  };
+}
+
+function buildControlMarkup(device, controlStates) {
+  if (controlStates.length === 0) {
+    return '<span class="summary-chip">No safe controls exposed yet</span>';
+  }
+
+  return controlStates.map((stateItem, index) => {
+    if (stateItem.control.kind === 'switch') {
+      return buildSwitchControlMarkup(device, stateItem, index);
+    }
+    if (stateItem.control.kind === 'select') {
+      return buildSelectControlMarkup(device, stateItem, index);
+    }
+    return '';
+  }).join('');
+}
+
+function buildSwitchControlMarkup(device, stateItem, index) {
+  const isOn = stateItem.fnValue === '1';
+  const nextValue = isOn ? '0' : '1';
+  const idleLabel = `${isOn ? 'Turn off' : 'Turn on'} ${stateItem.fnName || stateItem.fnCode}`;
+
+  return `
+    <div class="device-control" data-control-state="${escapeHtml(stateItem.fnCode)}">
+      <div class="device-control__meta">
+        <span class="device-control__name">${escapeHtml(stateItem.fnName || stateItem.fnCode)}</span>
+        <span class="device-control__value">${escapeHtml(formatStateValue(stateItem))}</span>
+      </div>
+      <div class="device-actions">
+        <button
+          type="button"
+          class="button ${isOn ? 'button--danger' : 'button--action'}"
+          data-action="toggle"
+          data-device-sn="${escapeHtml(device.sn)}"
+          data-fn-code="${escapeHtml(stateItem.fnCode)}"
+          data-next-value="${nextValue}"
+          data-idle-label="${escapeHtml(idleLabel)}"
+          data-testid="device-command-${index}"
+        >${escapeHtml(idleLabel)}</button>
+      </div>
+    </div>
+  `;
+}
+
+function buildSelectControlMarkup(device, stateItem, index) {
+  const idleLabel = `Apply ${stateItem.fnName || stateItem.fnCode}`;
+  const options = (stateItem.control.allowedValues || []).map((option) => {
+    const selected = option.value === stateItem.fnValue ? ' selected' : '';
+    return `<option value="${escapeHtml(option.value)}"${selected}>${escapeHtml(option.label)}</option>`;
+  }).join('');
+
+  return `
+    <div class="device-control" data-control-state="${escapeHtml(stateItem.fnCode)}">
+      <div class="device-control__meta">
+        <span class="device-control__name">${escapeHtml(stateItem.fnName || stateItem.fnCode)}</span>
+        <span class="device-control__value">${escapeHtml(formatStateValue(stateItem))}</span>
+      </div>
+      <div class="device-control__input-row">
+        <select class="device-control__select" data-select-control aria-label="${escapeHtml(stateItem.fnName || stateItem.fnCode)}">
+          ${options}
+        </select>
+        <button
+          type="button"
+          class="button button--action"
+          data-action="select"
+          data-device-sn="${escapeHtml(device.sn)}"
+          data-fn-code="${escapeHtml(stateItem.fnCode)}"
+          data-idle-label="${escapeHtml(idleLabel)}"
+          data-testid="device-command-${index}"
+        >${escapeHtml(idleLabel)}</button>
+      </div>
+    </div>
+  `;
+}
+
+function isCommandCapableState(stateItem) {
+  return Boolean(stateItem?.control?.kind) && Array.isArray(stateItem.control.allowedValues);
+}
+
 function selectVisibleStates(states) {
   const selectedStates = [];
   const seenCodes = new Set();
@@ -475,12 +550,7 @@ function selectVisibleStates(states) {
 }
 
 function formatStateValue(stateItem) {
-  const fnType = typeof stateItem.fnType === 'string' ? stateItem.fnType.toLowerCase() : '';
-
-  if (fnType.includes('switch')) {
-    return stateItem.fnValue === '1' ? 'On' : 'Off';
-  }
-  if (fnType.includes('select') && stateItem.displayValue) {
+  if (stateItem.displayValue) {
     return String(stateItem.displayValue);
   }
   if (stateItem.fnValue !== null && stateItem.fnValue !== undefined && stateItem.fnValue !== '') {

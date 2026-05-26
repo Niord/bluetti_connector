@@ -35,7 +35,7 @@ The local server binds to `http://127.0.0.1:8080` by default and serves:
 - `/api/session/oauth/callback` - backend-owned browser OAuth callback route
 - `/api/devices` - discovered BLUETTI devices for the current session
 - `/api/devices/{device_sn}/refresh` - device state refresh through the backend
-- `/api/devices/{device_sn}/commands` - initial safe command execution through the backend
+- `/api/devices/{device_sn}/commands` - safe switch-style and select-style command execution through the backend
 
 ## Runtime Settings
 
@@ -58,7 +58,7 @@ Run the deterministic smoke checks for the extracted core and backend:
 .venv/bin/python -m pytest tests/core/test_standalone_core_smoke.py tests/backend/test_backend_smoke.py
 ```
 
-These checks use a fake BLUETTI gateway that preserves the first-pass upstream response envelope while verifying device discovery, refresh, and command execution.
+These checks use a fake BLUETTI gateway that preserves the first-pass upstream response envelope while verifying device discovery, refresh, richer device payloads, and safe command execution.
 
 ### Local UI Smoke Harness
 
@@ -70,7 +70,7 @@ Use the reusable fake gateway to validate the browser flow without a real BLUETT
 4. Click `Load devices` before configuring a session and confirm the page shows the backend session error
 5. Fill the session form with `expired-access-token` as the access token, `test-refresh-token` as the refresh token, `http://127.0.0.1:18081` as Gateway URL, `http://127.0.0.1:18081/sso` as SSO URL, and `ws://127.0.0.1/unused` as WebSocket URL
 6. Save the session and confirm the page renders `Workshop Battery` even though the initial access token is stale
-7. Refresh devices and toggle `AC Output`; confirm success feedback and the runtime panel shows that both access and refresh tokens are present
+7. Refresh devices, toggle `AC Output`, and change `Working mode`; confirm success feedback and the runtime panel shows that both access and refresh tokens are present
 
 ### Browser OAuth Verification
 
@@ -89,12 +89,12 @@ For live-account verification:
 Implemented in the current baseline:
 
 - standalone core extraction without `homeassistant` imports
-- local backend session setup, refresh-token bootstrap, backend-owned browser OAuth start/callback flow, device listing, device refresh, and initial command execution
-- backend-served local UI with loading, empty, error, and command feedback states
-- deterministic smoke verification against a fake BLUETTI gateway, including token refresh and retry recovery, plus focused backend coverage for browser OAuth state and callback exchange
+- local backend session setup, refresh-token bootstrap, backend-owned browser OAuth start/callback flow, device listing, device refresh, and safe switch-style or select-style command execution
+- backend-served local UI with loading, empty, error, richer device-state display, and command feedback states
+- deterministic smoke verification against a fake BLUETTI gateway, including token refresh and retry recovery, command-state classification, and focused backend coverage for browser OAuth state and callback exchange
 
 Still intentionally out of scope for the first change:
 
 - automated verification against a real BLUETTI account
-- broader command coverage beyond the initial safe switch-style controls
+- free-form numeric or text command entry for BLUETTI states that do not expose safe allowed values in the current snapshot
 - production packaging, multi-user behavior, and websocket-first updates

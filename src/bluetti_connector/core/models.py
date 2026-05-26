@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Literal
 
 from .application_exception import ApplicationRuntimeException
 from .const import MANUFACTURER
@@ -13,6 +13,7 @@ __LOGGER__ = logging.getLogger(__name__)
 
 StateCallback = Callable[[], None]
 DeviceUnboundHandler = Callable[["BluettiDevice"], None]
+StateControlKind = Literal["switch", "select"]
 
 
 class BluettiData:
@@ -77,22 +78,56 @@ class BluettiState:
         self.support_mode_values = support_mode_values or []
         self.sensor_info = sensor_info or {}
 
-    def is_switch(self) -> bool:
-        return len(self.support_mode_values) == 0
+    def control_kind(self) -> StateControlKind | None:
+        fn_type = (self.fn_type or "").lower()
+        if "switch" in fn_type:
+            return "switch"
+        if self.support_mode_values:
+            return "select"
+        return None
 
-    def set_value(self, value: str) -> None:
-        if self.is_switch() or any(option["code"] == value for option in self.support_mode_values):
-            self.fn_value = value
+    def is_command_capable(self) -> bool:
+        return self.control_kind() is not None
+
+    def is_switch(self) -> bool:
+        return self.control_kind() == "switch"
+
+    def allowed_values(self) -> list[dict[str, str]]:
+        options = [
+            {
+                "value": str(option.get("code")),
+                "label": str(option.get("name") or option.get("code")),
+            }
+            for option in self.support_mode_values
+            if option.get("code") is not None
+        ]
+        if options:
+            return options
+        if self.is_switch():
+            return [
+                {"value": "0", "label": "Off"},
+                {"value": "1", "label": "On"},
+            ]
+        return []
+
+    def validate_value(self, value: str) -> None:
+        if not self.is_command_capable():
+            raise ValueError(f"State {self.fn_code} is read-only")
+        if any(option["value"] == value for option in self.allowed_values()):
             return
         raise ValueError(f"Invalid value {value} for {self.fn_code}")
 
+    def set_value(self, value: str) -> None:
+        self.validate_value(value)
+        self.fn_value = value
+
     def get_name_for_value(self) -> str:
-        if self.is_switch():
-            return "On" if self.fn_value == "1" else "Off"
-        for option in self.support_mode_values:
-            if option["code"] == self.fn_value:
-                return option["name"]
-        return self.fn_value
+        for option in self.allowed_values():
+            if option["value"] == self.fn_value:
+                return option["label"]
+        if self.fn_value is not None and self.fn_value != "":
+            return self.fn_value
+        return "Unknown"
 
     def __repr__(self) -> str:
         return f"<BluettiState {self.fn_code}={self.fn_value}>"
@@ -178,6 +213,8 @@ class BluettiDevice:
             raise ValueError(f"No state with code {fn_code}")
         if self._api_client is None:
             raise RuntimeError("BLUETTI device has no API client attached")
+
+        state.validate_value(value)
 
         result = await self._api_client.control_device(
             {"sn": self.device_id, "fnCode": fn_code, "fnValue": value}

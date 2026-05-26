@@ -420,17 +420,32 @@ class BackendService:
             manufacturer=device.manufacturer,
             online=device.online,
             batteryLevel=device.battery_level,
-            states=[
-                DeviceStatePayload(
-                    fnCode=state.fn_code,
-                    fnName=state.fn_name,
-                    fnValue=state.fn_value,
-                    fnType=state.fn_type,
-                    displayValue=state.get_name_for_value(),
-                    sensorInfo=state.sensor_info,
-                )
-                for state in device.states
-            ],
+            states=[self._serialize_state(state) for state in device.states],
+        )
+
+    def _serialize_state(self, state) -> DeviceStatePayload:
+        control_kind = state.control_kind()
+        control = None
+        if control_kind is not None:
+            control = DeviceStatePayload.ControlPayload(
+                kind=control_kind,
+                allowedValues=[
+                    DeviceStatePayload.ControlOption(
+                        value=option["value"],
+                        label=option["label"],
+                    )
+                    for option in state.allowed_values()
+                ],
+            )
+
+        return DeviceStatePayload(
+            fnCode=state.fn_code,
+            fnName=state.fn_name,
+            fnValue=state.fn_value,
+            fnType=state.fn_type,
+            displayValue=state.get_name_for_value(),
+            sensorInfo=state.sensor_info,
+            control=control,
         )
 
     def _product_client(self):
