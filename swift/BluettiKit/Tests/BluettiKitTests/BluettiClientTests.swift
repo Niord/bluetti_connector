@@ -242,6 +242,109 @@ final class BluettiClientTests: XCTestCase {
         XCTAssertEqual(updatedDevice.acOutputEnabled, true)
     }
 
+    func testSetDCOutputAcceptsSuccessfulFulfillmentWithoutData() async throws {
+        let store = InMemoryTokenStore(initialTokens: BluettiTokenState(accessToken: "active-access", refreshToken: "refresh-token"))
+        let session = makeSession()
+        var fulfillmentWasCalled = false
+
+        MockURLProtocol.requestHandler = { request in
+            switch request.url?.path {
+            case "/api/bluiotdata/ha/v1/devices":
+                return try self.jsonResponse(
+                    url: request.url!,
+                    status: 200,
+                    jsonObject: [
+                        "msgId": "devices",
+                        "msgCode": 0,
+                        "data": [
+                            [
+                                "sn": "AC300-TEST-001",
+                                "online": "1",
+                                "model": "AC300",
+                                "name": "Home Battery",
+                                "isBindByCurUser": "1",
+                                "stateList": [
+                                    [
+                                        "fnCode": "SetCtrlDc",
+                                        "fnName": "DC Output",
+                                        "fnValue": "0",
+                                        "fnType": "switch",
+                                        "supportModeValues": [],
+                                    ],
+                                    [
+                                        "fnCode": "SOC",
+                                        "fnName": "Battery SOC",
+                                        "fnValue": "100",
+                                        "fnType": "number",
+                                        "supportModeValues": [],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ]
+                )
+
+            case "/api/bluiotdata/ha/v1/deviceStates":
+                XCTAssertEqual(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first?.value, "AC300-TEST-001")
+                return try self.jsonResponse(
+                    url: request.url!,
+                    status: 200,
+                    jsonObject: [
+                        "msgId": "deviceStates",
+                        "msgCode": 0,
+                        "data": [
+                            [
+                                "sn": "AC300-TEST-001",
+                                "online": "1",
+                                "model": "AC300",
+                                "name": "Home Battery",
+                                "isBindByCurUser": "1",
+                                "stateList": [
+                                    [
+                                        "fnCode": "SetCtrlDc",
+                                        "fnName": "DC Output",
+                                        "fnValue": "0",
+                                        "fnType": "switch",
+                                        "supportModeValues": [],
+                                    ],
+                                    [
+                                        "fnCode": "SOC",
+                                        "fnName": "Battery SOC",
+                                        "fnValue": "100",
+                                        "fnType": "number",
+                                        "supportModeValues": [],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ]
+                )
+
+            case "/api/bluiotdata/ha/v1/fulfillment":
+                fulfillmentWasCalled = true
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+                return try self.jsonResponse(
+                    url: request.url!,
+                    status: 200,
+                    jsonObject: [
+                        "msgId": "fulfillment",
+                        "msgCode": 0,
+                    ]
+                )
+
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "unknown")")
+                return try self.jsonResponse(url: request.url!, status: 500, jsonObject: [:])
+            }
+        }
+
+        let client = BluettiClient(tokenStore: store, session: session)
+        let updatedDevice = try await client.setDCOutput(serialNumber: "AC300-TEST-001", isOn: true)
+
+        XCTAssertTrue(fulfillmentWasCalled)
+        XCTAssertEqual(updatedDevice.dcOutputEnabled, true)
+    }
+
     private func makeSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockURLProtocol.self]

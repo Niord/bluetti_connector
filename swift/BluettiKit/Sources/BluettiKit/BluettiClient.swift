@@ -166,7 +166,7 @@ public actor BluettiClient {
     private func sendCommand(using device: BluettiDevice, serialNumber: String, fnCode: String, value: String) async throws -> BluettiDevice {
         try device.validateCommand(fnCode: fnCode, value: value)
 
-        let _: ControlResultPayload = try await performAuthenticatedRequest(
+        try await performAuthenticatedCommandAcceptanceRequest(
             method: .post,
             pathComponents: ["api", "bluiotdata", "ha", "v1", "fulfillment"],
             body: DeviceCommandPayload(sn: serialNumber, fnCode: fnCode, fnValue: value)
@@ -236,6 +236,22 @@ public actor BluettiClient {
         )
     }
 
+    private func performAuthenticatedCommandAcceptanceRequest<Body: Encodable>(
+        method: HTTPMethod,
+        pathComponents: [String],
+        queryItems: [URLQueryItem] = [],
+        body: Body
+    ) async throws {
+        let bodyData = try jsonEncoder.encode(body)
+        try await performAuthenticatedCommandAcceptanceRequest(
+            method: method,
+            pathComponents: pathComponents,
+            queryItems: queryItems,
+            bodyData: bodyData,
+            contentType: "application/json"
+        )
+    }
+
     private func performAuthenticatedRequest<Value: Decodable>(
         method: HTTPMethod,
         pathComponents: [String],
@@ -266,6 +282,37 @@ public actor BluettiClient {
         }
     }
 
+    private func performAuthenticatedCommandAcceptanceRequest(
+        method: HTTPMethod,
+        pathComponents: [String],
+        queryItems: [URLQueryItem],
+        bodyData: Data?,
+        contentType: String?
+    ) async throws {
+        var attemptedRefresh = false
+        while true {
+            let accessToken = try await requireAccessToken()
+            do {
+                try await performCommandAcceptanceEnvelopeRequest(
+                    method: method,
+                    pathComponents: pathComponents,
+                    queryItems: queryItems,
+                    accessToken: accessToken,
+                    bodyData: bodyData,
+                    contentType: contentType
+                )
+                return
+            } catch BluettiError.authenticationExpired {
+                if attemptedRefresh {
+                    try await clearSession()
+                    throw BluettiError.authenticationExpired
+                }
+                _ = try await refreshAccessToken()
+                attemptedRefresh = true
+            }
+        }
+    }
+
     private func performEnvelopeRequest<Value: Decodable>(
         method: HTTPMethod,
         pathComponents: [String],
@@ -274,6 +321,63 @@ public actor BluettiClient {
         bodyData: Data?,
         contentType: String?
     ) async throws -> Value {
+        let (envelope, data): (BluettiEnvelope<Value>, Data) = try await executeGatewayEnvelopeRequest(
+            method: method,
+            pathComponents: pathComponents,
+            queryItems: queryItems,
+            accessToken: accessToken,
+            bodyData: bodyData,
+            contentType: contentType,
+            responseType: Value.self
+        )
+
+        if envelope.msgCode == 805 {
+            throw BluettiError.authenticationExpired
+        }
+        if envelope.msgCode != 0 {
+            throw BluettiError.cloudError(code: envelope.msgCode, description: responseDescription(for: data))
+        }
+        guard let value = envelope.data else {
+            throw BluettiError.invalidResponse("The BLUETTI gateway response did not contain data.")
+        }
+        return value
+    }
+
+    private func performCommandAcceptanceEnvelopeRequest(
+        method: HTTPMethod,
+        pathComponents: [String],
+        queryItems: [URLQueryItem],
+        accessToken: String,
+        bodyData: Data?,
+        contentType: String?
+    ) async throws {
+        let (envelope, data): (BluettiEnvelope<ControlResultPayload?>, Data) = try await executeGatewayEnvelopeRequest(
+            method: method,
+            pathComponents: pathComponents,
+            queryItems: queryItems,
+            accessToken: accessToken,
+            bodyData: bodyData,
+            contentType: contentType,
+            responseType: ControlResultPayload?.self
+        )
+
+        if envelope.msgCode == 805 {
+            throw BluettiError.authenticationExpired
+        }
+        if envelope.msgCode != 0 {
+            throw BluettiError.cloudError(code: envelope.msgCode, description: responseDescription(for: data))
+        }
+    }
+
+    private func executeGatewayEnvelopeRequest<Value: Decodable>(
+        method: HTTPMethod,
+        pathComponents: [String],
+        queryItems: [URLQueryItem],
+        accessToken: String,
+        bodyData: Data?,
+        contentType: String?,
+        responseType: Value.Type
+    ) async throws -> (BluettiEnvelope<Value>, Data) {
         var components = URLComponents(url: gatewayURL(pathComponents: pathComponents), resolvingAgainstBaseURL: false)
         if !queryItems.isEmpty {
             components?.queryItems = queryItems
@@ -302,17 +406,7 @@ public actor BluettiClient {
             throw BluettiError.transportError(status: httpResponse.statusCode, description: responseDescription(for: data))
         }
 
-        let envelope = try decodeEnvelope(Value.self, from: data)
-        if envelope.msgCode == 805 {
-            throw BluettiError.authenticationExpired
-        }
-        if envelope.msgCode != 0 {
-            throw BluettiError.cloudError(code: envelope.msgCode, description: responseDescription(for: data))
-        }
-        guard let value = envelope.data else {
-            throw BluettiError.invalidResponse("The BLUETTI gateway response did not contain data.")
-        }
-        return value
+        return (try decodeEnvelope(responseType, from: data), data)
     }
 
     private func requestOAuthToken(form: [String: String]) async throws -> BluettiTokenState {
