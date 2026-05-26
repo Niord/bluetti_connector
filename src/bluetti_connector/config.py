@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     refresh_token: str = ""
     oauth_client_id: str = "HomeAssistant"
     oauth_client_secret: str = "SG9tZUFzc2lzdGFudA=="
+    oauth_state_ttl_seconds: int = 600
     token_store_path: str = ".local/state/bluetti/tokens.json"
 
     request_timeout_seconds: float = 15.0

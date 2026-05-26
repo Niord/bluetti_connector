@@ -31,6 +31,8 @@ The local server binds to `http://127.0.0.1:8080` by default and serves:
 - `/health` - runtime health snapshot
 - `/api/bootstrap` - sanitized bootstrap metadata for local development
 - `/api/session` - current backend session snapshot and session setup
+- `/api/session/oauth/start` - backend-owned browser OAuth start route
+- `/api/session/oauth/callback` - backend-owned browser OAuth callback route
 - `/api/devices` - discovered BLUETTI devices for the current session
 - `/api/devices/{device_sn}/refresh` - device state refresh through the backend
 - `/api/devices/{device_sn}/commands` - initial safe command execution through the backend
@@ -41,10 +43,10 @@ The application reads `.env` values with the `BLUETTI_` prefix. The initial boot
 
 - app and server: `BLUETTI_APP_NAME`, `BLUETTI_ENVIRONMENT`, `BLUETTI_SERVER_HOST`, `BLUETTI_SERVER_PORT`, `BLUETTI_DEV_RELOAD`
 - BLUETTI cloud endpoints: `BLUETTI_CLOUD_SSO_URL`, `BLUETTI_CLOUD_GATEWAY_URL`, `BLUETTI_CLOUD_WSS_URL`
-- session and refresh tokens: `BLUETTI_ACCESS_TOKEN`, `BLUETTI_REFRESH_TOKEN`, `BLUETTI_OAUTH_CLIENT_ID`, `BLUETTI_OAUTH_CLIENT_SECRET`, `BLUETTI_TOKEN_STORE_PATH`
+- session and refresh tokens: `BLUETTI_ACCESS_TOKEN`, `BLUETTI_REFRESH_TOKEN`, `BLUETTI_OAUTH_CLIENT_ID`, `BLUETTI_OAUTH_CLIENT_SECRET`, `BLUETTI_OAUTH_STATE_TTL_SECONDS`, `BLUETTI_TOKEN_STORE_PATH`
 - runtime behavior: `BLUETTI_REQUEST_TIMEOUT_SECONDS`
 
-The standalone runtime currently supports direct access tokens, direct refresh tokens, or both. A live probe against `https://sso.bluettipower.com/oauth2/token` rejected `grant_type=password`, so direct username and password bootstrap is intentionally out of scope.
+The standalone runtime currently supports direct access tokens, direct refresh tokens, backend-owned browser OAuth, or any persisted combination of those tokens. A live probe against `https://sso.bluettipower.com/oauth2/token` rejected `grant_type=password`, so direct username and password bootstrap is intentionally out of scope.
 
 ## Verification
 
@@ -70,14 +72,26 @@ Use the reusable fake gateway to validate the browser flow without a real BLUETT
 6. Save the session and confirm the page renders `Workshop Battery` even though the initial access token is stale
 7. Refresh devices and toggle `AC Output`; confirm success feedback and the runtime panel shows that both access and refresh tokens are present
 
+### Browser OAuth Verification
+
+The local session panel now also offers `Connect with BLUETTI`, which sends the current page through `/api/session/oauth/start` and returns through `/api/session/oauth/callback` after BLUETTI login.
+
+For live-account verification:
+
+1. Start the local app: `bluetti-connector-dev`
+2. Open `http://127.0.0.1:8080`
+3. Click `Connect with BLUETTI`
+4. Complete BLUETTI login in the browser and confirm the app returns to `/` with a success message and a configured session
+5. If BLUETTI rejects the callback or the local redirect URI is not accepted, use the manual token form as a temporary fallback and record the exact failure in `.agents/context/known-issues.md`
+
 ## Current Scope
 
 Implemented in the current baseline:
 
 - standalone core extraction without `homeassistant` imports
-- local backend session setup, refresh-token bootstrap, device listing, device refresh, and initial command execution
+- local backend session setup, refresh-token bootstrap, backend-owned browser OAuth start/callback flow, device listing, device refresh, and initial command execution
 - backend-served local UI with loading, empty, error, and command feedback states
-- deterministic smoke verification against a fake BLUETTI gateway, including token refresh and retry recovery
+- deterministic smoke verification against a fake BLUETTI gateway, including token refresh and retry recovery, plus focused backend coverage for browser OAuth state and callback exchange
 
 Still intentionally out of scope for the first change:
 

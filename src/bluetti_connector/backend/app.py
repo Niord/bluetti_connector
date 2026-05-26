@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..config import get_settings
@@ -59,6 +59,26 @@ def create_app() -> FastAPI:
     @app.post("/api/session")
     async def setup_session(payload: SessionSetupRequest) -> dict[str, object]:
         return backend_service.configure_session(payload).model_dump()
+
+    @app.get("/api/session/oauth/start", include_in_schema=False)
+    async def session_oauth_start(request: Request) -> RedirectResponse:
+        authorize_url = backend_service.begin_browser_oauth(
+            redirect_uri=str(request.url_for("session_oauth_callback")),
+        )
+        return RedirectResponse(authorize_url, status_code=307)
+
+    @app.get("/api/session/oauth/callback", include_in_schema=False, name="session_oauth_callback")
+    async def session_oauth_callback(
+        state: str | None = None,
+        code: str | None = None,
+        error: str | None = None,
+    ) -> RedirectResponse:
+        redirect_location = await backend_service.complete_browser_oauth_callback(
+            state_token=state,
+            code=code,
+            error=error,
+        )
+        return RedirectResponse(redirect_location, status_code=303)
 
     @app.get("/api/devices")
     async def list_devices() -> dict[str, object]:

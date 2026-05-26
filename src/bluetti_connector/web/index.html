@@ -33,6 +33,10 @@
             Supply an access token, a refresh token, or both. When a refresh token is available, the backend can recover the session locally after token expiry.
           </p>
 
+          <p class="supporting-copy">
+            Or let the local backend start BLUETTI login in the browser and store the resulting session for you.
+          </p>
+
           <form id="session-form" class="form-stack" data-testid="session-form">
             <div class="field-grid">
               <label class="field">
@@ -64,6 +68,7 @@
             </label>
 
             <div class="toolbar">
+              <a id="browser-login" href="/api/session/oauth/start" class="button button--secondary">Connect with BLUETTI</a>
               <button id="session-submit" type="submit" class="button button--primary">Save session</button>
               <button id="load-devices" type="button" class="button button--ghost">Load devices</button>
             </div>

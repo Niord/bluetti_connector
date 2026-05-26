@@ -4,6 +4,19 @@ const state = {
   devices: [],
 };
 
+const PRIORITY_STATE_CODES = [
+  'SetCtrlWorkMode',
+  'SOC',
+  'SetCtrlAc',
+  'SetCtrlDc',
+  'PVAllTotalPower',
+  'GridAllTotalPower',
+  'DCLoadAllTotalPower',
+  'ACLoadAllTotalPower',
+];
+
+const MAX_VISIBLE_STATE_ROWS = 8;
+
 const elements = {
   sessionForm: document.querySelector('#session-form'),
   accessToken: document.querySelector('#access-token'),
@@ -39,6 +52,7 @@ async function init() {
   bindEvents();
   await loadBootstrap();
   await loadSession();
+  applyOauthFeedbackFromUrl();
 
   if (state.session?.configured) {
     await fetchDevices();
@@ -198,6 +212,26 @@ function renderSession() {
   }
 }
 
+function applyOauthFeedbackFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const oauthStatus = params.get('oauth');
+  if (!oauthStatus) {
+    return;
+  }
+
+  if (oauthStatus === 'success') {
+    showFeedback(elements.sessionFeedback, 'BLUETTI browser login completed. Session saved locally.', 'success');
+  } else {
+    showFeedback(elements.sessionFeedback, formatOauthReason(params.get('oauth_reason')), 'error');
+  }
+
+  params.delete('oauth');
+  params.delete('oauth_reason');
+  const nextQuery = params.toString();
+  const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ''}${window.location.hash}`;
+  window.history.replaceState({}, document.title, nextUrl);
+}
+
 async function syncSessionStatus() {
   state.session = await requestJson('/api/session');
   renderSession();
@@ -242,7 +276,8 @@ function buildDeviceCard(device) {
     return typeof stateItem.fnType === 'string' && stateItem.fnType.toLowerCase().includes('switch');
   });
 
-  const stateRows = device.states.slice(0, 6).map((stateItem) => {
+  const visibleStates = selectVisibleStates(device.states);
+  const stateRows = visibleStates.map((stateItem) => {
     return `
       <div class="state-row">
         <span class="state-row__name">${escapeHtml(stateItem.fnName || stateItem.fnCode)}</span>
@@ -412,9 +447,41 @@ function emptyToNull(value) {
   return trimmed.length === 0 ? null : trimmed;
 }
 
+function selectVisibleStates(states) {
+  const selectedStates = [];
+  const seenCodes = new Set();
+
+  for (const fnCode of PRIORITY_STATE_CODES) {
+    const stateItem = states.find((item) => item.fnCode === fnCode);
+    if (!stateItem) {
+      continue;
+    }
+    selectedStates.push(stateItem);
+    seenCodes.add(fnCode);
+  }
+
+  for (const stateItem of states) {
+    if (selectedStates.length >= MAX_VISIBLE_STATE_ROWS) {
+      break;
+    }
+    if (seenCodes.has(stateItem.fnCode)) {
+      continue;
+    }
+    selectedStates.push(stateItem);
+    seenCodes.add(stateItem.fnCode);
+  }
+
+  return selectedStates;
+}
+
 function formatStateValue(stateItem) {
-  if (typeof stateItem.fnType === 'string' && stateItem.fnType.toLowerCase().includes('switch')) {
+  const fnType = typeof stateItem.fnType === 'string' ? stateItem.fnType.toLowerCase() : '';
+
+  if (fnType.includes('switch')) {
     return stateItem.fnValue === '1' ? 'On' : 'Off';
+  }
+  if (fnType.includes('select') && stateItem.displayValue) {
+    return String(stateItem.displayValue);
   }
   if (stateItem.fnValue !== null && stateItem.fnValue !== undefined && stateItem.fnValue !== '') {
     return String(stateItem.fnValue);
@@ -427,6 +494,22 @@ function formatError(error) {
     return error.message;
   }
   return 'An unexpected UI error occurred.';
+}
+
+function formatOauthReason(reason) {
+  if (reason === 'access_denied') {
+    return 'BLUETTI login was cancelled before the local session was created.';
+  }
+  if (reason === 'invalid_state') {
+    return 'The BLUETTI login callback was no longer valid. Start the browser login again.';
+  }
+  if (reason === 'missing_code') {
+    return 'The BLUETTI login callback did not include an authorization code.';
+  }
+  if (reason === 'exchange_failed') {
+    return 'The local backend could not exchange the BLUETTI authorization code for tokens.';
+  }
+  return 'The BLUETTI browser login did not complete successfully.';
 }
 
 function isAuthSessionError(error) {

@@ -1,14 +1,25 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
+import secrets
+import time
 from typing import TypeVar
+from urllib.parse import urlencode
 
 import aiohttp
 
 from ..config import Settings
-from ..core import ApplicationProfile, AuthenticationExpiredError, BluettiData, BluettiDevice, ProductClient
-from .auth import refresh_access_token
+from ..core import (
+    ApplicationProfile,
+    ApplicationRuntimeException,
+    AuthenticationExpiredError,
+    BluettiData,
+    BluettiDevice,
+    ProductClient,
+)
+from .auth import build_authorize_url, exchange_authorization_code, refresh_access_token
 from .errors import DeviceNotFoundError, InvalidCommandError, SessionNotConfiguredError
 from .schemas import (
     AuthMode,
@@ -38,10 +49,21 @@ class SessionConfig:
     uses_stored_session: bool = False
 
 
+@dataclass(frozen=True)
+class PendingOAuthFlow:
+    state_token: str
+    redirect_uri: str
+    sso_url: str
+    gateway_url: str
+    wss_url: str
+    expires_at: float
+
+
 class BackendService:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._token_store = LocalTokenStore(settings.token_store)
+        self._pending_oauth_flows: dict[str, PendingOAuthFlow] = {}
         self._session_config = self._load_initial_session_config()
 
     def get_session_snapshot(self) -> SessionSnapshot:
@@ -75,20 +97,75 @@ class BackendService:
         )
 
     def configure_session(self, payload: SessionSetupRequest) -> SessionSnapshot:
-        self._session_config = SessionConfig(
+        self._set_session_config(
             access_token=payload.accessToken,
             refresh_token=payload.refreshToken,
             sso_url=payload.ssoUrl or self._settings.cloud_sso_url,
             gateway_url=payload.gatewayUrl or self._settings.cloud_gateway_url,
             wss_url=payload.wssUrl or self._settings.cloud_wss_url,
             source="request",
-            auth_mode=self._resolve_auth_mode(
-                access_token=payload.accessToken,
-                refresh_token=payload.refreshToken,
-            ),
         )
-        self._persist_session_state(self._session_config)
         return self.get_session_snapshot()
+
+    def begin_browser_oauth(self, *, redirect_uri: str) -> str:
+        self._prune_pending_oauth_flows()
+        state_token = secrets.token_urlsafe(32)
+        sso_url = self._settings.cloud_sso_url
+        gateway_url = self._settings.cloud_gateway_url
+        wss_url = self._settings.cloud_wss_url
+        self._pending_oauth_flows[state_token] = PendingOAuthFlow(
+            state_token=state_token,
+            redirect_uri=redirect_uri,
+            sso_url=sso_url,
+            gateway_url=gateway_url,
+            wss_url=wss_url,
+            expires_at=time.time() + self._settings.oauth_state_ttl_seconds,
+        )
+        return build_authorize_url(
+            sso_url=sso_url,
+            client_id=self._settings.oauth_client_id,
+            redirect_uri=redirect_uri,
+            state=state_token,
+        )
+
+    async def complete_browser_oauth_callback(
+        self,
+        *,
+        state_token: str | None,
+        code: str | None,
+        error: str | None,
+    ) -> str:
+        self._prune_pending_oauth_flows()
+        pending_flow = self._consume_pending_oauth_flow(state_token)
+        if pending_flow is None:
+            return self._oauth_redirect_location(reason="invalid_state")
+
+        if error:
+            return self._oauth_redirect_location(reason=self._sanitize_oauth_error(error))
+        if not code:
+            return self._oauth_redirect_location(reason="missing_code")
+
+        try:
+            granted_state = await exchange_authorization_code(
+                sso_url=pending_flow.sso_url,
+                code=code,
+                redirect_uri=pending_flow.redirect_uri,
+                client_id=self._settings.oauth_client_id,
+                client_secret=self._settings.oauth_client_secret,
+                request_timeout_seconds=self._settings.request_timeout_seconds,
+            )
+        except (ApplicationRuntimeException, AuthenticationExpiredError):
+            return self._oauth_redirect_location(reason="exchange_failed")
+
+        self._set_session_config(
+            access_token=granted_state.access_token,
+            refresh_token=granted_state.refresh_token,
+            sso_url=pending_flow.sso_url,
+            gateway_url=pending_flow.gateway_url,
+            wss_url=pending_flow.wss_url,
+            source="oauth",
+        )
+        return self._oauth_redirect_location(reason=None)
 
     def _load_initial_session_config(self) -> SessionConfig | None:
         stored_state = self._token_store.load()
@@ -155,12 +232,44 @@ class BackendService:
         return DeviceCommandResponse(accepted=True, device=self._serialize_device(device))
 
     async def _load_device(self, client: ProductClient, device_sn: str) -> BluettiDevice:
-        status = await client.get_device_status(device_sn)
-        devices = BluettiData(status.data or [])
-        devices.attach_api_client(client)
-        device = devices.get_device_by_sn(device_sn)
+        products_response, status_response = await asyncio.gather(
+            client.get_user_products(),
+            client.get_device_status(device_sn),
+        )
+
+        status_products = list(status_response.data or [])
+        if status_products and status_products[0].isBindByCurUser == "0":
+            bind_result = await client.bind_devices({"bindSnList": [device_sn]})
+            if not bind_result.is_ok():
+                raise ApplicationRuntimeException(msgCode=bind_result.msgCode, data=bind_result.data)
+            status_response = await client.get_device_status(device_sn)
+
+        product_device = BluettiData(products_response.data or []).get_device_by_sn(device_sn)
+        status_device = BluettiData(status_response.data or []).get_device_by_sn(device_sn)
+
+        device = product_device or status_device
         if device is None:
             raise DeviceNotFoundError(device_sn)
+
+        if status_device is not None and device is not status_device:
+            device.on_line = status_device.on_line or device.on_line
+            device.name = status_device.name or device.name
+            device.model = status_device.model or device.model
+            device._merge_states(
+                [
+                    {
+                        "fnCode": state.fn_code,
+                        "fnName": state.fn_name,
+                        "fnValue": state.fn_value,
+                        "fnType": state.fn_type,
+                        "supportModeValues": state.support_mode_values,
+                        "sensorInfo": state.sensor_info,
+                    }
+                    for state in status_device.states
+                ]
+            )
+
+        device.api_client = client
         return device
 
     def _create_profile(self) -> ApplicationProfile:
@@ -230,6 +339,53 @@ class BackendService:
             refresh_token=refreshed_state.refresh_token or session_config.refresh_token,
         )
         self._persist_session_state(self._session_config)
+
+    def _set_session_config(
+        self,
+        *,
+        access_token: str | None,
+        refresh_token: str | None,
+        sso_url: str,
+        gateway_url: str,
+        wss_url: str,
+        source: str,
+        uses_stored_session: bool = False,
+    ) -> None:
+        self._session_config = SessionConfig(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            sso_url=sso_url,
+            gateway_url=gateway_url,
+            wss_url=wss_url,
+            source=source,
+            auth_mode=self._resolve_auth_mode(
+                access_token=access_token,
+                refresh_token=refresh_token,
+            ),
+            uses_stored_session=uses_stored_session,
+        )
+        self._persist_session_state(self._session_config)
+
+    def _prune_pending_oauth_flows(self) -> None:
+        now = time.time()
+        self._pending_oauth_flows = {
+            key: flow for key, flow in self._pending_oauth_flows.items() if flow.expires_at > now
+        }
+
+    def _consume_pending_oauth_flow(self, state_token: str | None) -> PendingOAuthFlow | None:
+        if not state_token:
+            return None
+        return self._pending_oauth_flows.pop(state_token, None)
+
+    def _oauth_redirect_location(self, *, reason: str | None) -> str:
+        if reason is None:
+            return "/?oauth=success"
+        return f"/?{urlencode({'oauth': 'error', 'oauth_reason': reason})}"
+
+    def _sanitize_oauth_error(self, error: str) -> str:
+        if error == "access_denied":
+            return "access_denied"
+        return "oauth_failed"
 
     def _invalidate_session(self) -> None:
         self._session_config = None
