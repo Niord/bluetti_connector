@@ -10,7 +10,8 @@
 - The local operator runtime packaging slice is archived at `openspec/changes/archive/2026-05-26-package-local-operator-runtime/`.
 - The live-account verification hardening slice is archived at `openspec/changes/archive/2026-05-26-harden-live-account-verification/`.
 - The standalone core surface cleanup slice is archived at `openspec/changes/archive/2026-05-26-simplify-standalone-core-surface/`.
-- The repository now includes the standalone core, local backend API, local web control page, refresh-capable token bootstrap, persisted token reuse, token refresh recovery, backend-owned browser OAuth start and callback flow, backend-normalized safe switch-style and select-style controls, synced main capability specs, backend-owned live updates with local SSE fan-out and UI auto-refresh, operator and development startup entrypoints, and gated secret-safe live-account verification paths.
+- The self-contained native Swift client kit slice is archived at `openspec/changes/archive/2026-05-26-add-swift-macos-client-kit/`.
+- The repository now includes the standalone core, local backend API, local web control page, refresh-capable token bootstrap, persisted token reuse, token refresh recovery, backend-owned browser OAuth start and callback flow, backend-normalized safe switch-style and select-style controls, synced main capability specs, backend-owned live updates with local SSE fan-out and UI auto-refresh, operator and development startup entrypoints, gated secret-safe live-account verification paths, and a repository-local `swift/BluettiKit` package for direct BLUETTI cloud access from Xcode macOS apps.
 
 ## Active Workstreams
 - The standalone auth path now includes both manual token entry and backend-owned browser OAuth for first-time local setup.
@@ -21,6 +22,7 @@
 
 ## Next Workstreams
 - Extend fake-gateway and integration coverage so more end-to-end live-update behavior is verifiable without real-account dependencies.
+- Decide whether the next native Apple-platform slice should add websocket live updates or keep the first macOS app on explicit refresh plus command flows.
 
 ## Next Decisions
 - Decide whether manual token entry remains a permanent fallback after browser OAuth is live-validated.
@@ -29,6 +31,7 @@
 - Decide whether operator defaults should stay XDG-style across platforms or if macOS-specific application support paths deserve a follow-up slice.
 - Decide whether additional read-only BLUETTI telemetry should be surfaced by default or remain behind prioritized device-card selection.
 - Decide how the local backend and web UI should be packaged for local operators.
+- Decide whether the Swift package should stay as a reusable client kit only or grow a repository-owned macOS app target in a follow-up change.
 
 ## Later
 - Consolidate repeated fake-gateway verification helpers if the smoke surface grows.

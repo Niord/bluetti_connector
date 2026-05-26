@@ -7,6 +7,7 @@ Standalone BLUETTI connector under extraction from the official Home Assistant i
 - `src/bluetti_connector/core/` - standalone BLUETTI core extraction target
 - `src/bluetti_connector/backend/` - local FastAPI backend
 - `src/bluetti_connector/web/` - backend-served static web files
+- `swift/BluettiKit/` - self-contained Swift Package for direct BLUETTI cloud integration from Xcode macOS apps
 - `tests/core/test_standalone_core_smoke.py` - standalone core smoke flow against a fake BLUETTI gateway
 - `tests/backend/test_backend_smoke.py` - backend smoke flow against a fake BLUETTI gateway
 - `tests/fake_bluetti_gateway.py` - reusable fake BLUETTI gateway for manual local UI verification
@@ -167,6 +168,7 @@ Implemented in the current baseline:
 - backend-served local UI with loading, empty, error, richer device-state display, safe command controls, backend-owned live-update status, and automatic per-device refresh when the backend publishes sanitized device-update events
 - deterministic smoke verification against a fake BLUETTI gateway, including token refresh and retry recovery, plus focused backend and frontend regression coverage for browser OAuth, live-update status, SSE fan-out, and UI refresh behavior
 - gated backend-owned live-account verification with fail-fast prerequisite validation and staged sanitized reporting for auth, devices, and live-update readiness
+- a repository-local `swift/BluettiKit` package that implements native BLUETTI OAuth, token refresh, device discovery, battery and power helpers, and AC/DC control flow for Xcode-based macOS apps without Python runtime dependencies
 
 Still intentionally out of scope for the first change:
 
