@@ -13,6 +13,13 @@ struct BluettiMonitorMenuContent: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
+            if let liveUpdateStatusLine = viewModel.liveUpdateStatusLine {
+                Text(liveUpdateStatusLine)
+                    .font(.caption)
+                    .foregroundStyle(viewModel.usesPollingFallback ? .orange : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if !viewModel.isAuthenticated {
                 Button(viewModel.isAuthenticating ? "Connecting..." : "Connect with BLUETTI") {
                     viewModel.connect()

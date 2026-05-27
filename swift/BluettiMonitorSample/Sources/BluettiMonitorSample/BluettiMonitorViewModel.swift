@@ -14,6 +14,7 @@ final class BluettiMonitorViewModel: ObservableObject {
     @Published private(set) var isAuthenticated = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var lastUpdatedAt: Date?
+    @Published private(set) var liveUpdateSnapshot = BluettiLiveUpdateSnapshot(configured: false, status: .disabled, lastError: nil)
 
     private let client: BluettiClient
     private let notificationCenter: UNUserNotificationCenter
@@ -21,6 +22,8 @@ final class BluettiMonitorViewModel: ObservableObject {
     private let refreshInterval: Duration
 
     private var pollingTask: Task<Void, Never>?
+    private var liveUpdateSubscriptionTask: Task<Void, Never>?
+    private var liveHintRefreshTask: Task<Void, Never>?
     private var hasSentLowBatteryNotification = false
 
     init(
@@ -44,6 +47,8 @@ final class BluettiMonitorViewModel: ObservableObject {
 
     deinit {
         pollingTask?.cancel()
+        liveUpdateSubscriptionTask?.cancel()
+        liveHintRefreshTask?.cancel()
     }
 
     var selectedDevice: BluettiDevice? {
@@ -101,6 +106,30 @@ final class BluettiMonitorViewModel: ObservableObject {
 
     var canRefresh: Bool {
         isAuthenticated && !isLoading && !isAuthenticating
+    }
+
+    var liveUpdateStatusLine: String? {
+        guard isAuthenticated else {
+            return nil
+        }
+
+        switch liveUpdateSnapshot.status {
+        case .connected:
+            return "Live updates connected."
+        case .connecting:
+            return "Connecting live updates..."
+        case .degraded:
+            if let lastError = liveUpdateSnapshot.lastError, !lastError.isEmpty {
+                return "\(lastError) Polling fallback is active."
+            }
+            return "Live updates degraded. Polling fallback is active."
+        case .disabled:
+            return "Live updates unavailable. Polling fallback is active."
+        }
+    }
+
+    var usesPollingFallback: Bool {
+        isAuthenticated && liveUpdateSnapshot.status != .connected
     }
 
     var acOutputAvailable: Bool {
@@ -161,12 +190,17 @@ final class BluettiMonitorViewModel: ObservableObject {
 
             pollingTask?.cancel()
             pollingTask = nil
+            liveUpdateSubscriptionTask?.cancel()
+            liveUpdateSubscriptionTask = nil
+            liveHintRefreshTask?.cancel()
+            liveHintRefreshTask = nil
             devices = []
             selectedDeviceSerialNumber = nil
             isAuthenticated = false
             isLoading = false
             isAuthenticating = false
             lastUpdatedAt = nil
+            liveUpdateSnapshot = BluettiLiveUpdateSnapshot(configured: false, status: .disabled, lastError: nil)
             hasSentLowBatteryNotification = false
         }
     }
@@ -218,6 +252,8 @@ final class BluettiMonitorViewModel: ObservableObject {
             isAuthenticated = tokens?.hasAnyToken == true
             if isAuthenticated {
                 await refreshData(startPollingIfNeeded: true)
+            } else {
+                syncPollingStrategy()
             }
         } catch {
             handle(error: error)
@@ -257,8 +293,9 @@ final class BluettiMonitorViewModel: ObservableObject {
                 lastUpdatedAt = Date()
                 isLoading = false
                 if startPollingIfNeeded {
-                    ensurePollingTask()
+                    await ensureLiveUpdatesRunning()
                 }
+                syncPollingStrategy()
                 return
             }
 
@@ -277,8 +314,9 @@ final class BluettiMonitorViewModel: ObservableObject {
             isAuthenticated = true
             handleLowBatteryState(for: refreshedDevice)
             if startPollingIfNeeded {
-                ensurePollingTask()
+                await ensureLiveUpdatesRunning()
             }
+            syncPollingStrategy()
         } catch {
             handle(error: error)
         }
@@ -297,6 +335,7 @@ final class BluettiMonitorViewModel: ObservableObject {
             lastUpdatedAt = Date()
             isAuthenticated = true
             handleLowBatteryState(for: refreshedDevice)
+            syncPollingStrategy()
         } catch {
             handle(error: error)
         }
@@ -314,6 +353,7 @@ final class BluettiMonitorViewModel: ObservableObject {
             lastUpdatedAt = Date()
             isAuthenticated = true
             handleLowBatteryState(for: refreshedDevice)
+            syncPollingStrategy()
         } catch {
             handle(error: error)
         }
@@ -335,6 +375,63 @@ final class BluettiMonitorViewModel: ObservableObject {
                 await refreshData(startPollingIfNeeded: false)
             }
         }
+    }
+
+    private func ensureLiveUpdatesRunning() async {
+        guard isAuthenticated else {
+            return
+        }
+
+        if liveUpdateSubscriptionTask == nil {
+            liveUpdateSubscriptionTask = Task { @MainActor [client] in
+                let stream = await client.liveUpdates()
+                for await event in stream {
+                    guard !Task.isCancelled else {
+                        return
+                    }
+                    handleLiveUpdateEvent(event)
+                }
+            }
+        }
+
+        liveUpdateSnapshot = await client.liveUpdateSnapshot()
+        await client.startLiveUpdates()
+    }
+
+    private func handleLiveUpdateEvent(_ event: BluettiLiveUpdateEvent) {
+        switch event {
+        case let .status(snapshot):
+            liveUpdateSnapshot = snapshot
+            syncPollingStrategy()
+        case let .deviceUpdate(serialNumber):
+            guard serialNumber == selectedDeviceSerialNumber else {
+                return
+            }
+            guard !isLoading else {
+                return
+            }
+
+            liveHintRefreshTask?.cancel()
+            liveHintRefreshTask = Task { @MainActor [serialNumber] in
+                await refreshSelectedDevice(serialNumber: serialNumber)
+            }
+        }
+    }
+
+    private func syncPollingStrategy() {
+        guard isAuthenticated else {
+            pollingTask?.cancel()
+            pollingTask = nil
+            return
+        }
+
+        if liveUpdateSnapshot.status == .connected {
+            pollingTask?.cancel()
+            pollingTask = nil
+            return
+        }
+
+        ensurePollingTask()
     }
 
     private func requestNotificationPermission() async {
@@ -406,6 +503,11 @@ final class BluettiMonitorViewModel: ObservableObject {
                 selectedDeviceSerialNumber = nil
                 pollingTask?.cancel()
                 pollingTask = nil
+                liveUpdateSubscriptionTask?.cancel()
+                liveUpdateSubscriptionTask = nil
+                liveHintRefreshTask?.cancel()
+                liveHintRefreshTask = nil
+                liveUpdateSnapshot = BluettiLiveUpdateSnapshot(configured: false, status: .disabled, lastError: nil)
             default:
                 break
             }

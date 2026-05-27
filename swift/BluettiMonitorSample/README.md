@@ -6,7 +6,7 @@ It shows how to:
 
 - restore a persisted BLUETTI session from the keychain
 - start browser OAuth from a menu bar app
-- poll the selected BLUETTI device on an interval
+- subscribe to native BLUETTI live updates for the selected device and fall back to polling when needed
 - display battery, charging, and power summary in `MenuBarExtra`
 - toggle AC and DC outputs
 - send low-battery notifications without repeating them every poll cycle
@@ -38,4 +38,5 @@ That file keeps the same top-level app entry pattern, but swaps the random mock 
 
 - The sample uses the production BLUETTI cloud endpoints from `BluettiKit`
 - Browser OAuth starts from the menu content and uses the first available macOS window as its presentation anchor
-- Polling is used on purpose; native websocket live updates are still out of scope for the current Swift slices
+- The sample starts native live updates for an authenticated session, refreshes the selected device on matching live-update hints, and pauses fallback polling while live updates stay connected
+- When live updates are degraded or unavailable, the sample surfaces that status in the menu and keeps device state current through manual refresh plus fallback polling

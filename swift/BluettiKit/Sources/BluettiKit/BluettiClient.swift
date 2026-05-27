@@ -4,10 +4,18 @@ public actor BluettiClient {
     private let configuration: BluettiCloudConfiguration
     private let tokenStore: any BluettiTokenStore
     private let session: URLSession
+    private let webSocketTaskFactory: BluettiWebSocketTaskFactory
     private let jsonDecoder = JSONDecoder()
     private let jsonEncoder = JSONEncoder()
 
     private var cachedTokens: BluettiTokenState?
+    private var liveUpdateSnapshotValue = BluettiLiveUpdateSnapshot(configured: false, status: .disabled, lastError: nil)
+    private var liveUpdateSubscribers: [UUID: AsyncStream<BluettiLiveUpdateEvent>.Continuation] = [:]
+    private var liveUpdateWebSocketTask: (any BluettiWebSocketTaskProtocol)?
+    private var liveUpdateReceiveTask: Task<Void, Never>?
+    private var liveUpdateHeartbeatTask: Task<Void, Never>?
+    private var liveUpdateAccessToken: String?
+    private var currentLiveUpdateSocketURL: URL?
 
     public init(
         configuration: BluettiCloudConfiguration = .production,
@@ -17,6 +25,21 @@ public actor BluettiClient {
         self.configuration = configuration
         self.tokenStore = tokenStore ?? InMemoryTokenStore()
         self.session = session
+        self.webSocketTaskFactory = { url in
+            URLSessionBluettiWebSocketTask(task: session.webSocketTask(with: url))
+        }
+    }
+
+    internal init(
+        configuration: BluettiCloudConfiguration = .production,
+        tokenStore: (any BluettiTokenStore)? = nil,
+        session: URLSession = .shared,
+        webSocketTaskFactory: @escaping BluettiWebSocketTaskFactory
+    ) {
+        self.configuration = configuration
+        self.tokenStore = tokenStore ?? InMemoryTokenStore()
+        self.session = session
+        self.webSocketTaskFactory = webSocketTaskFactory
     }
 
     public nonisolated func authorizeURL(redirectURI: URL, state: String) throws -> URL {
@@ -42,6 +65,80 @@ public actor BluettiClient {
         try await currentTokens()
     }
 
+    public func liveUpdateSnapshot() -> BluettiLiveUpdateSnapshot {
+        liveUpdateSnapshotValue
+    }
+
+    public func liveUpdates() -> AsyncStream<BluettiLiveUpdateEvent> {
+        AsyncStream { continuation in
+            let subscriberID = UUID()
+            liveUpdateSubscribers[subscriberID] = continuation
+            continuation.yield(.status(liveUpdateSnapshotValue))
+            continuation.onTermination = { @Sendable _ in
+                Task {
+                    await self.removeLiveUpdateSubscriber(subscriberID)
+                }
+            }
+        }
+    }
+
+    public func startLiveUpdates() async {
+        guard let socketURL = liveUpdateSocketURL() else {
+            updateLiveUpdateSnapshot(
+                BluettiLiveUpdateSnapshot(configured: false, status: .disabled, lastError: nil)
+            )
+            return
+        }
+
+        let accessToken: String
+        do {
+            accessToken = try await requireAccessToken()
+        } catch {
+            updateLiveUpdateSnapshot(
+                BluettiLiveUpdateSnapshot(configured: false, status: .disabled, lastError: nil)
+            )
+            return
+        }
+
+        if liveUpdateSnapshotValue.status == .connecting || liveUpdateSnapshotValue.status == .connected {
+            if liveUpdateAccessToken == accessToken, currentLiveUpdateSocketURL == socketURL {
+                return
+            }
+        }
+
+        await stopLiveUpdatesInternal(resetToDisabled: false)
+
+        liveUpdateAccessToken = accessToken
+        currentLiveUpdateSocketURL = socketURL
+        liveUpdateWebSocketTask = webSocketTaskFactory(socketURL)
+        await liveUpdateWebSocketTask?.resume()
+        updateLiveUpdateSnapshot(
+            BluettiLiveUpdateSnapshot(configured: true, status: .connecting, lastError: nil)
+        )
+
+        liveUpdateReceiveTask = Task {
+            await self.runLiveUpdateReceiveLoop()
+        }
+        liveUpdateHeartbeatTask = Task {
+            await self.runLiveUpdateHeartbeatLoop()
+        }
+
+        do {
+            try await sendLiveUpdateFrame(
+                BluettiStompFrame.connectFrame(
+                    host: socketURL.host ?? "",
+                    accessToken: accessToken
+                )
+            )
+        } catch {
+            await degradeLiveUpdates(with: error)
+        }
+    }
+
+    public func stopLiveUpdates() async {
+        await stopLiveUpdatesInternal(resetToDisabled: true)
+    }
+
     public func setTokenState(_ tokens: BluettiTokenState) async throws {
         if !tokens.hasAnyToken {
             try await clearSession()
@@ -53,6 +150,7 @@ public actor BluettiClient {
     }
 
     public func clearSession() async throws {
+        await stopLiveUpdatesInternal(resetToDisabled: true)
         cachedTokens = nil
         try await tokenStore.clearTokens()
     }
@@ -467,6 +565,203 @@ public actor BluettiClient {
         pathComponents.reduce(configuration.ssoBaseURL) { url, component in
             url.appendingPathComponent(component)
         }
+    }
+
+    private func removeLiveUpdateSubscriber(_ subscriberID: UUID) {
+        liveUpdateSubscribers.removeValue(forKey: subscriberID)
+    }
+
+    private func liveUpdateSocketURL() -> URL? {
+        guard let scheme = configuration.liveUpdatesBaseURL.scheme?.lowercased(), scheme == "wss" || scheme == "ws" else {
+            return nil
+        }
+
+        return configuration.liveUpdatesBaseURL.appendingPathComponent("websocket")
+    }
+
+    private func updateLiveUpdateSnapshot(_ snapshot: BluettiLiveUpdateSnapshot) {
+        liveUpdateSnapshotValue = snapshot
+        publishLiveUpdateEvent(.status(snapshot))
+    }
+
+    private func publishLiveUpdateEvent(_ event: BluettiLiveUpdateEvent) {
+        for continuation in liveUpdateSubscribers.values {
+            continuation.yield(event)
+        }
+    }
+
+    private func stopLiveUpdatesInternal(resetToDisabled: Bool) async {
+        let webSocketTask = liveUpdateWebSocketTask
+        liveUpdateWebSocketTask = nil
+        liveUpdateReceiveTask?.cancel()
+        liveUpdateReceiveTask = nil
+        liveUpdateHeartbeatTask?.cancel()
+        liveUpdateHeartbeatTask = nil
+        liveUpdateAccessToken = nil
+        currentLiveUpdateSocketURL = nil
+        await webSocketTask?.cancel(with: .normalClosure, reason: nil)
+
+        if resetToDisabled {
+            updateLiveUpdateSnapshot(
+                BluettiLiveUpdateSnapshot(configured: false, status: .disabled, lastError: nil)
+            )
+        }
+    }
+
+    private func degradeLiveUpdates(with error: Error) async {
+        let webSocketTask = liveUpdateWebSocketTask
+        let isConfigured = liveUpdateAccessToken != nil && currentLiveUpdateSocketURL != nil
+
+        liveUpdateWebSocketTask = nil
+        liveUpdateHeartbeatTask?.cancel()
+        liveUpdateHeartbeatTask = nil
+        await webSocketTask?.cancel(with: .normalClosure, reason: nil)
+
+        updateLiveUpdateSnapshot(
+            BluettiLiveUpdateSnapshot(
+                configured: isConfigured,
+                status: .degraded,
+                lastError: sanitizedLiveUpdateError(error)
+            )
+        )
+    }
+
+    private func sanitizedLiveUpdateError(_ error: Error) -> String {
+        if let transportError = error as? BluettiLiveUpdateTransportError,
+           let description = transportError.errorDescription {
+            return description
+        }
+        if let bluettiError = error as? BluettiError,
+           case .authenticationExpired = bluettiError {
+            return BluettiLiveUpdateTransportError.authenticationExpired.errorDescription ?? "Live updates authentication expired."
+        }
+        if error is CancellationError {
+            return BluettiLiveUpdateTransportError.disconnected.errorDescription ?? "Live updates disconnected."
+        }
+
+        let description = (error as NSError).localizedDescription
+        if description.isEmpty || description == "The operation couldn’t be completed. (Swift.CancellationError error 1.)" {
+            return BluettiLiveUpdateTransportError.disconnected.errorDescription ?? "Live updates disconnected."
+        }
+        return description
+    }
+
+    private func runLiveUpdateReceiveLoop() async {
+        while !Task.isCancelled {
+            guard let webSocketTask = liveUpdateWebSocketTask else {
+                return
+            }
+
+            do {
+                let message = try await webSocketTask.receive()
+                try await handleLiveUpdateMessage(message)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard liveUpdateWebSocketTask != nil else {
+                    return
+                }
+                let liveUpdateError = (error as? BluettiLiveUpdateTransportError) ?? BluettiLiveUpdateTransportError.disconnected
+                await degradeLiveUpdates(with: liveUpdateError)
+                return
+            }
+        }
+    }
+
+    private func runLiveUpdateHeartbeatLoop() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(10))
+            guard !Task.isCancelled else {
+                return
+            }
+            guard liveUpdateSnapshotValue.status == .connected else {
+                continue
+            }
+
+            do {
+                try await sendLiveUpdateFrame("\n")
+            } catch {
+                await degradeLiveUpdates(with: error)
+                return
+            }
+        }
+    }
+
+    private func sendLiveUpdateFrame(_ frame: String) async throws {
+        guard let webSocketTask = liveUpdateWebSocketTask else {
+            throw BluettiLiveUpdateTransportError.disconnected
+        }
+        try await webSocketTask.send(.string(frame))
+    }
+
+    private func handleLiveUpdateMessage(_ message: URLSessionWebSocketTask.Message) async throws {
+        switch message {
+        case let .string(text):
+            try await handleLiveUpdateFrame(text)
+        case let .data(data):
+            guard let text = String(data: data, encoding: .utf8) else {
+                throw BluettiLiveUpdateTransportError.invalidPayload
+            }
+            try await handleLiveUpdateFrame(text)
+        @unknown default:
+            throw BluettiLiveUpdateTransportError.invalidPayload
+        }
+    }
+
+    private func handleLiveUpdateFrame(_ text: String) async throws {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return
+        }
+
+        let frame = try BluettiStompFrame(text: text)
+        switch frame.command {
+        case "CONNECTED":
+            guard let userName = frame.headers["user-name"], !userName.isEmpty else {
+                throw BluettiLiveUpdateTransportError.invalidResponse("Live updates did not return a BLUETTI user identifier.")
+            }
+            try await sendLiveUpdateFrame(
+                BluettiStompFrame.subscribeFrame(destination: "/ws-subscribe/user/\(userName)/notify")
+            )
+            updateLiveUpdateSnapshot(
+                BluettiLiveUpdateSnapshot(configured: true, status: .connected, lastError: nil)
+            )
+        case "MESSAGE":
+            guard let deviceSerialNumber = try liveUpdateDeviceSerialNumber(from: frame.body) else {
+                return
+            }
+            publishLiveUpdateEvent(.deviceUpdate(serialNumber: deviceSerialNumber))
+        case "ERROR":
+            throw try liveUpdateError(from: frame)
+        default:
+            return
+        }
+    }
+
+    private func liveUpdateDeviceSerialNumber(from body: String) throws -> String? {
+        guard !body.isEmpty else {
+            return nil
+        }
+
+        let payload = try jsonDecoder.decode(BluettiLiveUpdateMessagePayload.self, from: Data(body.utf8))
+        return payload.data?.deviceSn
+    }
+
+    private func liveUpdateError(from frame: BluettiStompFrame) throws -> Error {
+        let serializedMessage = frame.headers["message"]?.replacingOccurrences(of: "\\c", with: ":")
+        let rawPayload = serializedMessage?.isEmpty == false ? serializedMessage! : frame.body
+        guard !rawPayload.isEmpty,
+              let data = rawPayload.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return BluettiLiveUpdateTransportError.invalidPayload
+        }
+
+        let code = object["msgCode"] as? Int ?? 0
+        let description = (object["message"] as? String) ?? (object["msg"] as? String) ?? "Unknown live update error."
+        if code == 805 {
+            return BluettiLiveUpdateTransportError.authenticationExpired
+        }
+        return BluettiLiveUpdateTransportError.cloudError(code: code, description: description)
     }
 }
 

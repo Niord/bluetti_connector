@@ -16,7 +16,8 @@
 - The menu bar status-item battery percentage follow-up is archived at `openspec/changes/archive/2026-05-26-show-menubar-battery-percentage/`.
 - The empty Swift command-response tolerance follow-up is archived at `openspec/changes/archive/2026-05-26-tolerate-empty-command-response/`.
 - The fake-gateway live-update verification slice is archived at `openspec/changes/archive/2026-05-27-add-fake-gateway-live-updates-e2e/`.
-- The repository now includes the standalone core, local backend API, local web control page, refresh-capable token bootstrap, persisted token reuse, token refresh recovery, backend-owned browser OAuth start and callback flow, backend-normalized safe switch-style and select-style controls, synced main capability specs, backend-owned live updates with local SSE fan-out and UI auto-refresh, operator and development startup entrypoints, gated secret-safe live-account verification paths, deterministic repository-local fake-gateway live-update verification with an explicit loopback `ws://` opt-in, a repository-local `swift/BluettiKit` package for direct BLUETTI cloud access from Xcode macOS apps, and a copyable `swift/BluettiMonitorSample` SwiftUI menu bar app sample whose browser login returns safely into the app, whose visible status item mirrors the current battery percentage, and whose AC/DC commands tolerate successful empty fulfillment payloads without surfacing a false error.
+- The native Swift live-update slice is archived at `openspec/changes/archive/2026-05-27-add-swift-live-device-updates/`.
+- The repository now includes the standalone core, local backend API, local web control page, refresh-capable token bootstrap, persisted token reuse, token refresh recovery, backend-owned browser OAuth start and callback flow, backend-normalized safe switch-style and select-style controls, synced main capability specs, backend-owned live updates with local SSE fan-out and UI auto-refresh, operator and development startup entrypoints, gated secret-safe live-account verification paths, deterministic repository-local fake-gateway live-update verification with an explicit loopback `ws://` opt-in, a repository-local `swift/BluettiKit` package for direct BLUETTI cloud access from Xcode macOS apps with native live-update status and device-update hints, and a copyable `swift/BluettiMonitorSample` SwiftUI menu bar app sample whose browser login returns safely into the app, whose visible status item mirrors the current battery percentage, whose selected device refreshes from matching native live-update hints, whose UI surfaces degraded live status, and whose AC/DC commands tolerate successful empty fulfillment payloads without surfacing a false error.
 
 ## Active Workstreams
 - The standalone auth path now includes both manual token entry and backend-owned browser OAuth for first-time local setup.
@@ -28,7 +29,6 @@
 
 ## Next Workstreams
 - Broaden fake-gateway verification from the current backend-stream and targeted browser harness coverage into richer operator-facing flows only if the added maintenance remains justified.
-- Decide whether the next native Apple-platform slice should add websocket live updates or keep the first macOS app on explicit refresh plus command flows.
 - Decide whether the menu bar sample should stay a copyable reference only or be promoted into a fuller repository-owned native app target.
 
 ## Next Decisions
@@ -38,7 +38,7 @@
 - Decide whether operator defaults should stay XDG-style across platforms or if macOS-specific application support paths deserve a follow-up slice.
 - Decide whether additional read-only BLUETTI telemetry should be surfaced by default or remain behind prioritized device-card selection.
 - Decide how the local backend and web UI should be packaged for local operators.
-- Decide whether the Swift package should stay as a reusable client kit only or grow a repository-owned macOS app target in a follow-up change.
+- Decide whether the Swift package should stay as a reusable client kit only or grow a repository-owned macOS app target beyond the current menu bar sample follow-up.
 
 ## Later
 - Consolidate repeated fake-gateway verification helpers if the smoke surface grows.
