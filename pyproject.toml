@@ -21,12 +21,6 @@ classifiers = [
   "Topic :: Home Automation",
 ]
 
-[project.urls]
-Homepage = "https://github.com/Niord/bluetti_connector"
-Repository = "https://github.com/Niord/bluetti_connector"
-Issues = "https://github.com/Niord/bluetti_connector/issues"
-Documentation = "https://github.com/Niord/bluetti_connector#readme"
-
 dependencies = [
   "aiohttp>=3.9,<4.0",
   "fastapi>=0.115,<1.0",
@@ -50,6 +44,12 @@ dev = [
 [project.scripts]
 bluetti-connector = "bluetti_connector.cli:main"
 bluetti-connector-dev = "bluetti_connector.cli:dev_main"
+
+[project.urls]
+Homepage = "https://github.com/Niord/bluetti_connector"
+Repository = "https://github.com/Niord/bluetti_connector"
+Issues = "https://github.com/Niord/bluetti_connector/issues"
+Documentation = "https://github.com/Niord/bluetti_connector#readme"
 
 [tool.hatch.build]
 include = [
