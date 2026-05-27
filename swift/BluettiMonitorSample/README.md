@@ -1,42 +1,29 @@
 # BluettiMonitorSample
 
-`BluettiMonitorSample` is a copyable SwiftUI macOS menu bar sample that uses the local `BluettiKit` package.
+`BluettiMonitorSample` is a SwiftUI macOS menu bar reference app built on top of the local `BluettiKit` package. It demonstrates native browser OAuth, device loading, selected-device live updates, polling fallback, low-battery notifications, and safe AC/DC output control.
 
-It shows how to:
+See [../../docs/macos-sample.md](../../docs/macos-sample.md) for build, Xcode setup, copy-into-app guidance, runtime notes, and current limitations.
 
-- restore a persisted BLUETTI session from the keychain
-- start browser OAuth from a menu bar app
-- subscribe to native BLUETTI live updates for the selected device and fall back to polling when needed
-- display battery, charging, and power summary in `MenuBarExtra`
-- toggle AC and DC outputs
-- send low-battery notifications without repeating them every poll cycle
+## Package Layout
 
-## What To Copy Into Xcode
+- `Sources/BluettiMonitorSample/BluettiMonitorApp.swift` contains the sample app entry point.
+- `Sources/BluettiMonitorSample/BluettiMonitorViewModel.swift` wires `BluettiKit` into menu state, auth, polling, live updates, and commands.
+- `Sources/BluettiMonitorSample/BluettiMonitorMenuContent.swift` contains the compact menu bar UI.
+- `CopyIntoXcode/BluettiMonitorApp.swift` provides a single-file reference for app prototypes that want the same integration shape.
 
-If you already started a macOS app in Xcode, the most useful files to copy first are:
+## Quick Build
 
-1. `Sources/BluettiMonitorSample/BluettiMonitorViewModel.swift`
-2. `Sources/BluettiMonitorSample/BluettiMonitorMenuContent.swift`
-3. `Sources/BluettiMonitorSample/BluettiMonitorApp.swift`
+```bash
+swift build
+```
 
-That replaces the random-value `BluettiManager` pattern with a real `BluettiKit`-backed view model.
+The package depends on `../BluettiKit` through a local SwiftPM dependency.
 
-If you prefer a single-file replacement for your existing `BluettiMonitorApp.swift`, use:
+## Xcode Notes
 
-- `CopyIntoXcode/BluettiMonitorApp.swift`
+1. Add the local package at `swift/BluettiKit`.
+2. Link the `BluettiKit` product to your macOS target.
+3. Register a custom URL scheme matching `bluetti-monitor://oauth/callback`.
+4. If you change the URL scheme, update `BluettiMonitorSampleConfig.redirectURI` in the sample code.
 
-That file keeps the same top-level app entry pattern, but swaps the random mock manager for a real `BluettiKit`-backed `BluettiManager`.
-
-## Xcode Setup
-
-1. Add the local package at `swift/BluettiKit`
-2. Link the `BluettiKit` product to your macOS target
-3. Register a custom URL scheme that matches `bluetti-monitor://oauth/callback`
-4. If you change the URL scheme, update `BluettiMonitorSampleConfig.redirectURI` in the sample code
-
-## Notes
-
-- The sample uses the production BLUETTI cloud endpoints from `BluettiKit`
-- Browser OAuth starts from the menu content and uses the first available macOS window as its presentation anchor
-- The sample starts native live updates for an authenticated session, refreshes the selected device on matching live-update hints, and pauses fallback polling while live updates stay connected
-- When live updates are degraded or unavailable, the sample surfaces that status in the menu and keeps device state current through manual refresh plus fallback polling
+The sample is intentionally a reference app. It does not include signing, notarization, installer packaging, or an update feed.

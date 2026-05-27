@@ -2,6 +2,8 @@
 
 `BluettiKit` is a self-contained Swift Package for native macOS BLUETTI clients. It talks directly to the verified BLUETTI cloud endpoints and does not call the Python runtime.
 
+See [../../docs/swift.md](../../docs/swift.md) for build, test, Xcode integration, OAuth, live-update, and command-support notes.
+
 ## Included Surface
 
 - browser OAuth authorize URL generation

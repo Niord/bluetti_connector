@@ -1,0 +1,16 @@
+BLUETTI Connector Notice
+
+This repository contains standalone BLUETTI connector work for Python, a local browser page, a Swift package, and a macOS sample app.
+
+Portions of the Python connector behavior and transport surface are adapted from, or verified against, the official BLUETTI Home Assistant integration:
+
+  https://github.com/bluetti-official/bluetti-home-assistant
+
+Reference baseline:
+
+  Release: v1.0.2, published 2026-03-25
+  Main reference commit: 64aa1f85e2eea9c6621cc80d390d7252cd13a83c, dated 2026-05-19
+
+See docs/upstream.md for the detailed source mapping and provenance notes.
+
+BLUETTI and Home Assistant names belong to their respective owners. This repository is a standalone project and should not be presented as an official BLUETTI product unless published by the BLUETTI organization.

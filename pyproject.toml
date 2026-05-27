@@ -7,7 +7,19 @@ name = "bluetti-connector"
 version = "0.1.0"
 description = "Standalone BLUETTI connector with a local backend and web control surface"
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.9"
+keywords = ["bluetti", "fastapi", "home-assistant", "macos", "swift"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Framework :: FastAPI",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Topic :: Home Automation",
+]
 dependencies = [
   "aiohttp>=3.9,<4.0",
   "fastapi>=0.115,<1.0",

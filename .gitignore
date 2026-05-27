@@ -4,6 +4,9 @@
 .github/prompts/
 .github/skills/
 
+# Local editor settings
+.vscode/
+
 # Local runtime configuration
 .env
 .local/
