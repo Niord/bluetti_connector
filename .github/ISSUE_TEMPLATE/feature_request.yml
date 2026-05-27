@@ -1,0 +1,63 @@
+name: Feature request
+description: Suggest a focused improvement for the Python runtime, local web page, Swift package, sample app, or repository automation.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement.
+
+        Keep requests specific and avoid posting tokens, account data, or other sensitive material.
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Target surface
+      description: Which repository area should change?
+      options:
+        - Python backend or core
+        - Local web page
+        - Swift package
+        - macOS sample app
+        - Repository automation or docs
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or gap
+      description: What user, operator, or contributor problem would this solve?
+      placeholder: Describe the current limitation or missing workflow.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: What should happen instead?
+      placeholder: Describe the behavior, UX, or repository change you want.
+    validations:
+      required: true
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints or non-goals
+      description: Note any safety, upstream, packaging, or maintenance constraints that matter.
+
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification idea
+      description: How would we know the request is complete?
+      placeholder: Tests, smoke commands, screenshots, or other acceptance signals.
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety checklist
+      options:
+        - label: This request does not require posting BLUETTI secrets or sensitive account details in public.
+          required: true

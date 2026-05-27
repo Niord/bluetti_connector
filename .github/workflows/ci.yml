@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python-web:
+    name: Python and Web Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: Run Python test suite
+        run: |
+          python -m pytest \
+            tests/test_runtime_entrypoints.py \
+            tests/test_runtime_paths.py \
+            tests/backend/test_backend_browser_oauth.py \
+            tests/backend/test_backend_session_state.py \
+            tests/backend/test_backend_smoke.py \
+            tests/backend/test_live_account_verification.py \
+            tests/backend/test_live_updates_manager.py \
+            tests/backend/test_live_updates_stream.py \
+            tests/core/test_standalone_core_smoke.py \
+            tests/core/test_state_control_metadata.py \
+            tests/core/test_websocket_client.py
+
+      - name: Run Ruff
+        run: python -m ruff check src/bluetti_connector tests
+
+      - name: Run browser-side checks
+        run: |
+          node --check src/bluetti_connector/web/assets/app.js
+          node --test tests/web/test_app_live_updates.mjs
+
+  swift:
+    name: Swift Checks
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run BluettiKit tests
+        working-directory: swift/BluettiKit
+        run: swift test
+
+      - name: Build BluettiMonitorSample
+        working-directory: swift/BluettiMonitorSample
+        run: swift build

@@ -1,8 +1,13 @@
 # BLUETTI Connector
 
+[![CI](https://github.com/Niord/bluetti_connector/actions/workflows/ci.yml/badge.svg)](https://github.com/Niord/bluetti_connector/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/Niord/bluetti_connector)](https://github.com/Niord/bluetti_connector/blob/main/LICENSE)
+
 BLUETTI Connector is a standalone project for working with BLUETTI cloud-connected power devices outside the Home Assistant runtime. The repository contains a Python connector and local backend, a backend-served browser page for local testing and control, a native Swift package, and a SwiftUI macOS menu bar sample.
 
 The work is based on verified behavior from the official BLUETTI Home Assistant integration. See [docs/upstream.md](docs/upstream.md) and [NOTICE](NOTICE) for provenance, attribution, and source-mapping details.
+
+Repository: [github.com/Niord/bluetti_connector](https://github.com/Niord/bluetti_connector) | Issues: [GitHub Issues](https://github.com/Niord/bluetti_connector/issues)
 
 ## Repository Status
 
@@ -91,3 +96,4 @@ The fake BLUETTI gateway in `tests/fake_bluetti_gateway.py` supports determinist
 - [NOTICE](NOTICE) records BLUETTI upstream attribution.
 - [CONTRIBUTING.md](CONTRIBUTING.md) describes development and verification expectations.
 - [SECURITY.md](SECURITY.md) explains how to report sensitive issues without exposing tokens or account data.
+- [GitHub Actions CI](https://github.com/Niord/bluetti_connector/actions/workflows/ci.yml) runs the deterministic Python, web, and Swift checks mirrored by the local verification commands above.

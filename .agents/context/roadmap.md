@@ -18,8 +18,10 @@
 - The fake-gateway live-update verification slice is archived at `openspec/changes/archive/2026-05-27-add-fake-gateway-live-updates-e2e/`.
 - The native Swift live-update slice is archived at `openspec/changes/archive/2026-05-27-add-swift-live-device-updates/`.
 - The public repository documentation readiness slice is archived at `openspec/changes/archive/2026-05-27-prepare-public-repository-docs/`.
+- The public repository automation slice is archived at `openspec/changes/archive/2026-05-27-add-public-repo-automation/`.
 - The repository now includes the standalone core, local backend API, local web control page, refresh-capable token bootstrap, persisted token reuse, token refresh recovery, backend-owned browser OAuth start and callback flow, backend-normalized safe switch-style and select-style controls, synced main capability specs, backend-owned live updates with local SSE fan-out and UI auto-refresh, operator and development startup entrypoints, gated secret-safe live-account verification paths, deterministic repository-local fake-gateway live-update verification with an explicit loopback `ws://` opt-in, a repository-local `swift/BluettiKit` package for direct BLUETTI cloud access from Xcode macOS apps with native live-update status and device-update hints, and a copyable `swift/BluettiMonitorSample` SwiftUI menu bar app sample whose browser login returns safely into the app, whose visible status item mirrors the current battery percentage, whose selected device refreshes from matching native live-update hints, whose UI surfaces degraded live status, and whose AC/DC commands tolerate successful empty fulfillment payloads without surfacing a false error.
 - The repository now also includes a public documentation surface with a concise root README, module-specific docs under `docs/`, public upstream attribution, and lightweight contribution or security guidance suitable for a public repository.
+- The repository now also includes a public GitHub Actions CI workflow, structured issue or pull-request templates, README badges, and package metadata links for `https://github.com/Niord/bluetti_connector`.
 
 ## Active Workstreams
 - The standalone auth path now includes both manual token entry and backend-owned browser OAuth for first-time local setup.
@@ -34,7 +36,8 @@
 - Decide whether the menu bar sample should stay a copyable reference only or be promoted into a fuller repository-owned native app target.
 
 ## Next Decisions
-- Decide whether the public repository should add CI or release badges, issue templates, and package-publishing metadata as the next public-polish slice after the documentation restructuring archive.
+- Decide whether the next public-polish slice should add release packaging metadata, contributor automation beyond templates, or broader repository-health surfaces.
+- Decide whether the first public automation workflow should later split into separate Python or web and Swift workflows or stay as one repository CI surface.
 - Decide whether manual token entry remains a permanent fallback after browser OAuth is live-validated.
 - Decide how much callback status detail belongs in the local UI versus backend logs and docs.
 - Decide how the packaging slice should balance simple local install ergonomics against future distribution formats.
