@@ -16,6 +16,7 @@ def isolate_backend_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("BLUETTI_TOKEN_STORE_PATH", str(token_store))
     monkeypatch.delenv("BLUETTI_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("BLUETTI_REFRESH_TOKEN", raising=False)
+    monkeypatch.delenv("BLUETTI_ENABLE_FAKE_GATEWAY_LIVE_UPDATES", raising=False)
     monkeypatch.delenv(RUNTIME_PROFILE_ENV_VAR, raising=False)
 
     yield

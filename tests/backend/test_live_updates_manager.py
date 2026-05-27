@@ -84,6 +84,48 @@ def test_live_updates_manager_disables_for_non_wss_or_missing_auth() -> None:
     assert created_clients == []
 
 
+def test_live_updates_manager_allows_opted_in_loopback_ws_sessions() -> None:
+    created_clients: list[FakeStompClient] = []
+
+    def client_factory(*args: Any, **kwargs: Any) -> FakeStompClient:
+        client = FakeStompClient(*args, **kwargs)
+        created_clients.append(client)
+        return client
+
+    manager = LiveUpdatesManager(
+        stomp_client_factory=client_factory,
+        allow_insecure_loopback_ws=True,
+    )
+
+    manager.configure(access_token="access-token", wss_url="ws://127.0.0.1:18081/ws-coordination")
+
+    snapshot = manager.snapshot()
+    assert snapshot.configured is True
+    assert snapshot.status == "connected"
+    assert created_clients[0].url == "ws://127.0.0.1:18081/ws-coordination"
+
+
+def test_live_updates_manager_rejects_opted_in_non_loopback_ws_sessions() -> None:
+    created_clients: list[FakeStompClient] = []
+
+    def client_factory(*args: Any, **kwargs: Any) -> FakeStompClient:
+        client = FakeStompClient(*args, **kwargs)
+        created_clients.append(client)
+        return client
+
+    manager = LiveUpdatesManager(
+        stomp_client_factory=client_factory,
+        allow_insecure_loopback_ws=True,
+    )
+
+    manager.configure(access_token="access-token", wss_url="ws://gw.example/ws-coordination")
+
+    snapshot = manager.snapshot()
+    assert snapshot.configured is False
+    assert snapshot.status == "disabled"
+    assert created_clients == []
+
+
 @pytest.mark.asyncio
 async def test_live_updates_manager_emits_sanitized_device_update_events() -> None:
     created_clients: list[FakeStompClient] = []

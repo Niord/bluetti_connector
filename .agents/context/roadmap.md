@@ -15,17 +15,19 @@
 - The Swift browser OAuth callback hardening slice is archived at `openspec/changes/archive/2026-05-26-fix-swift-oauth-main-actor-callback/`.
 - The menu bar status-item battery percentage follow-up is archived at `openspec/changes/archive/2026-05-26-show-menubar-battery-percentage/`.
 - The empty Swift command-response tolerance follow-up is archived at `openspec/changes/archive/2026-05-26-tolerate-empty-command-response/`.
-- The repository now includes the standalone core, local backend API, local web control page, refresh-capable token bootstrap, persisted token reuse, token refresh recovery, backend-owned browser OAuth start and callback flow, backend-normalized safe switch-style and select-style controls, synced main capability specs, backend-owned live updates with local SSE fan-out and UI auto-refresh, operator and development startup entrypoints, gated secret-safe live-account verification paths, a repository-local `swift/BluettiKit` package for direct BLUETTI cloud access from Xcode macOS apps, and a copyable `swift/BluettiMonitorSample` SwiftUI menu bar app sample whose browser login returns safely into the app, whose visible status item mirrors the current battery percentage, and whose AC/DC commands tolerate successful empty fulfillment payloads without surfacing a false error.
+- The fake-gateway live-update verification slice is archived at `openspec/changes/archive/2026-05-27-add-fake-gateway-live-updates-e2e/`.
+- The repository now includes the standalone core, local backend API, local web control page, refresh-capable token bootstrap, persisted token reuse, token refresh recovery, backend-owned browser OAuth start and callback flow, backend-normalized safe switch-style and select-style controls, synced main capability specs, backend-owned live updates with local SSE fan-out and UI auto-refresh, operator and development startup entrypoints, gated secret-safe live-account verification paths, deterministic repository-local fake-gateway live-update verification with an explicit loopback `ws://` opt-in, a repository-local `swift/BluettiKit` package for direct BLUETTI cloud access from Xcode macOS apps, and a copyable `swift/BluettiMonitorSample` SwiftUI menu bar app sample whose browser login returns safely into the app, whose visible status item mirrors the current battery percentage, and whose AC/DC commands tolerate successful empty fulfillment payloads without surfacing a false error.
 
 ## Active Workstreams
 - The standalone auth path now includes both manual token entry and backend-owned browser OAuth for first-time local setup.
 - The current local control surface treats safe switch-style and select-style controls as backend-normalized metadata, while leaving states without verified allowed values read-only.
 - Backend-owned live updates now cover backend-managed BLUETTI websocket lifecycle, `/api/live-updates` SSE fan-out, session-level live-update status, and browser-side auto-refresh for visible device cards.
-- Backend-owned live updates degrade cleanly to manual refresh when websocket startup, authentication, disconnect, or unsupported `ws://` configuration prevents live delivery.
+- Repository-local fake-gateway verification now covers opt-in loopback `ws://` delivery, backend SSE fan-out, and degraded disconnect fallback without real-account dependencies.
+- Backend-owned live updates still degrade cleanly to manual refresh when websocket startup, authentication, disconnect, or unsupported non-loopback `ws://` configuration prevents live delivery.
 - The current roadmap focus is extending operator confidence from gated live-account verification toward repeatable end-to-end verification workflows.
 
 ## Next Workstreams
-- Extend fake-gateway and integration coverage so more end-to-end live-update behavior is verifiable without real-account dependencies.
+- Broaden fake-gateway verification from the current backend-stream and targeted browser harness coverage into richer operator-facing flows only if the added maintenance remains justified.
 - Decide whether the next native Apple-platform slice should add websocket live updates or keep the first macOS app on explicit refresh plus command flows.
 - Decide whether the menu bar sample should stay a copyable reference only or be promoted into a fuller repository-owned native app target.
 
@@ -40,4 +42,4 @@
 
 ## Later
 - Consolidate repeated fake-gateway verification helpers if the smoke surface grows.
-- Extend the fake gateway with websocket notifications if operator-free end-to-end live-update coverage becomes worth the maintenance cost.
+- Broaden the fake gateway control endpoints if multi-device or richer operator-free live-update scenarios become worth the maintenance cost.

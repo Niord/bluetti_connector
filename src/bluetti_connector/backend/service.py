@@ -69,7 +69,9 @@ class BackendService:
         self._settings = settings
         self._token_store = LocalTokenStore(settings.token_store)
         self._pending_oauth_flows: dict[str, PendingOAuthFlow] = {}
-        self._live_updates = live_updates or LiveUpdatesManager()
+        self._live_updates = live_updates or LiveUpdatesManager(
+            allow_insecure_loopback_ws=settings.enable_fake_gateway_live_updates,
+        )
         self._session_config = self._load_initial_session_config()
         self._sync_live_updates()
 

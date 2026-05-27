@@ -204,6 +204,8 @@ class StompListener:
             self._callback(self._handler, frame.body)
 
     def on_error(self, ws: websocket.WebSocketApp, error: object) -> None:
+        if not isinstance(error, Exception) and "opcode=8" in str(error):
+            return
         wrapped = error if isinstance(error, Exception) else RuntimeError(str(error))
         self.client._handle_error(wrapped)
 

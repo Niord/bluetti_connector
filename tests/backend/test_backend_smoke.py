@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from copy import deepcopy
 import json
@@ -7,6 +8,7 @@ from typing import Any
 
 import pytest
 from aiohttp import web
+from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 
 from bluetti_connector.backend.app import create_app
@@ -15,6 +17,82 @@ from bluetti_connector.backend.app import create_app
 DEVICE_SN = "AC200L-TEST-001"
 CONTROL_CODE = "AC_OUTPUT_ON"
 SELECT_CONTROL_CODE = "SetCtrlWorkMode"
+LIVE_UPDATE_USER = "fake-user"
+
+
+def _parse_stomp_headers(frame: str) -> tuple[str, dict[str, str]]:
+    lines = frame.replace("\x00", "").splitlines()
+    if not lines:
+        return "", {}
+
+    headers: dict[str, str] = {}
+    for line in lines[1:]:
+        if not line:
+            break
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        headers[key] = value.strip()
+    return lines[0].strip(), headers
+
+
+def _build_connected_frame() -> str:
+    return (
+        "CONNECTED\n"
+        "version:1.2\n"
+        "heart-beat:10000,10000\n"
+        f"user-name:{LIVE_UPDATE_USER}\n"
+        "\n\x00"
+    )
+
+
+def _build_message_frame(*, destination: str, body: str) -> str:
+    return (
+        "MESSAGE\n"
+        "subscription:clientUniqueId\n"
+        f"destination:{destination}\n"
+        "content-type:application/json\n"
+        "\n"
+        f"{body}\x00"
+    )
+
+
+def _build_live_updates_url(base_url: str) -> str:
+    return base_url.replace("http://", "ws://", 1) + "/api/edgeiotgw/ws-coordination"
+
+
+async def _read_one_sse_event(response) -> tuple[str, dict[str, object]]:
+    chunk = await asyncio.wait_for(response.body_iterator.__anext__(), timeout=2)
+    lines = [line for line in chunk.splitlines() if line]
+
+    event_name = next(line.split(": ", 1)[1] for line in lines if line.startswith("event: "))
+    payload = json.loads(next(line.split(": ", 1)[1] for line in lines if line.startswith("data: ")))
+    return event_name, payload
+
+
+async def _open_live_updates_stream(app):
+    route = next(
+        route
+        for route in app.router.routes
+        if isinstance(route, APIRoute) and route.path == "/api/live-updates"
+    )
+    return await route.endpoint()
+
+
+async def _wait_for_status_event(response, expected_status: str) -> dict[str, object]:
+    for _ in range(10):
+        event_name, payload = await _read_one_sse_event(response)
+        if event_name == "status" and payload.get("status") == expected_status:
+            return payload
+    raise AssertionError(f"Expected live update status {expected_status!r}.")
+
+
+async def _wait_for_device_update_event(response, expected_device_sn: str) -> dict[str, object]:
+    for _ in range(10):
+        event_name, payload = await _read_one_sse_event(response)
+        if event_name == "device-update" and payload.get("deviceSn") == expected_device_sn:
+            return payload
+    raise AssertionError(f"Expected live update event for {expected_device_sn!r}.")
 
 
 @pytest.fixture
@@ -59,6 +137,9 @@ async def fake_bluetti_gateway() -> AsyncIterator[tuple[str, dict[str, Any]]]:
         "active_access_token": "test-access-token",
         "active_refresh_token": "test-refresh-token",
         "refresh_requests": [],
+        "live_update_sockets": [],
+        "last_live_update_subscription": None,
+        "reject_next_live_update_connection": False,
     }
 
     def token_expired_response() -> web.Response:
@@ -172,12 +253,80 @@ async def fake_bluetti_gateway() -> AsyncIterator[tuple[str, dict[str, Any]]]:
             }
         )
 
+    async def websocket_handler(request: web.Request) -> web.StreamResponse:
+        ws = web.WebSocketResponse(heartbeat=30)
+        await ws.prepare(request)
+
+        try:
+            async for message in ws:
+                if message.type != web.WSMsgType.TEXT:
+                    continue
+                if not message.data or message.data == "\n":
+                    continue
+
+                command, headers = _parse_stomp_headers(message.data)
+                if command == "CONNECT":
+                    if state["reject_next_live_update_connection"]:
+                        state["reject_next_live_update_connection"] = False
+                        await ws.close(message=b"rejected")
+                        break
+                    if headers.get("Authorization") != state["active_access_token"]:
+                        await ws.close(message=b"unauthorized")
+                        break
+                    await ws.send_str(_build_connected_frame())
+                    continue
+
+                if command == "SUBSCRIBE":
+                    state["last_live_update_subscription"] = headers.get("destination")
+                    state["live_update_sockets"].append(ws)
+        finally:
+            state["live_update_sockets"] = [
+                active_socket
+                for active_socket in state["live_update_sockets"]
+                if active_socket is not ws and not active_socket.closed
+            ]
+
+        return ws
+
+    async def emit_live_update_handler(request: web.Request) -> web.Response:
+        payload = await request.json()
+        device_sn = payload.get("deviceSn") or DEVICE_SN
+        destination = state["last_live_update_subscription"] or f"/ws-subscribe/user/{LIVE_UPDATE_USER}/notify"
+        frame = _build_message_frame(
+            destination=destination,
+            body=json.dumps({"data": {"deviceSn": device_sn}}),
+        )
+
+        live_update_sockets = [socket for socket in state["live_update_sockets"] if not socket.closed]
+        state["live_update_sockets"] = live_update_sockets
+        for socket in live_update_sockets:
+            await socket.send_str(frame)
+
+        return web.json_response(
+            {
+                "accepted": True,
+                "deviceSn": device_sn,
+                "subscriberCount": len(live_update_sockets),
+            }
+        )
+
+    async def disconnect_live_updates_handler(request: web.Request) -> web.Response:
+        state["reject_next_live_update_connection"] = True
+        for socket in list(state["live_update_sockets"]):
+            if not socket.closed:
+                await socket.close()
+        state["live_update_sockets"] = []
+        return web.json_response({"accepted": True})
+
     app = web.Application()
     app.router.add_get("/api/bluiotdata/ha/v1/devices", devices_handler)
     app.router.add_get("/api/bluiotdata/ha/v1/deviceStates", device_states_handler)
     app.router.add_post("/api/bluiotdata/ha/v1/fulfillment", control_handler)
     app.router.add_post("/api/bluiotdata/ha/v1/bindDevices", bind_devices_handler)
     app.router.add_post("/sso/oauth2/token", token_handler)
+    app.router.add_get("/api/edgeiotgw/ws-coordination/websocket", websocket_handler)
+    app.router.add_post("/api/test/live-updates/device-update", emit_live_update_handler)
+    app.router.add_post("/api/test/live-updates/disconnect", disconnect_live_updates_handler)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -546,3 +695,96 @@ async def test_backend_rejects_read_only_state_commands(
     assert command_response.status_code == 400
     assert command_response.json()["error"]["code"] == "INVALID_COMMAND"
     assert state["last_control"] is None
+
+
+@pytest.mark.asyncio
+async def test_backend_streams_fake_gateway_live_update_events(
+    fake_bluetti_gateway: tuple[str, dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base_url, state = fake_bluetti_gateway
+    monkeypatch.setenv("BLUETTI_ENABLE_FAKE_GATEWAY_LIVE_UPDATES", "true")
+    app = create_app()
+
+    async with (
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client,
+        AsyncClient(base_url=base_url) as gateway_client,
+    ):
+        session_response = await client.post(
+            "/api/session",
+            json={
+                "accessToken": "test-access-token",
+                "ssoUrl": f"{base_url}/sso",
+                "gatewayUrl": base_url,
+                "wssUrl": _build_live_updates_url(base_url),
+            },
+        )
+        assert session_response.status_code == 200
+        assert session_response.json()["liveUpdates"]["status"] in {"connecting", "connected"}
+
+        response = await _open_live_updates_stream(app)
+        try:
+            connected_payload = await _wait_for_status_event(response, "connected")
+            assert connected_payload == {
+                "eventType": "status",
+                "status": "connected",
+            }
+
+            emit_response = await gateway_client.post(
+                "/api/test/live-updates/device-update",
+                json={"deviceSn": DEVICE_SN},
+            )
+            assert emit_response.status_code == 200
+            assert emit_response.json()["subscriberCount"] == 1
+            assert state["last_live_update_subscription"] == f"/ws-subscribe/user/{LIVE_UPDATE_USER}/notify"
+
+            update_payload = await _wait_for_device_update_event(response, DEVICE_SN)
+        finally:
+            await response.body_iterator.aclose()
+
+    assert update_payload == {
+        "eventType": "device-update",
+        "deviceSn": DEVICE_SN,
+    }
+
+
+@pytest.mark.asyncio
+async def test_backend_reports_degraded_live_updates_when_fake_gateway_disconnects(
+    fake_bluetti_gateway: tuple[str, dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base_url, _state = fake_bluetti_gateway
+    monkeypatch.setenv("BLUETTI_ENABLE_FAKE_GATEWAY_LIVE_UPDATES", "true")
+    app = create_app()
+
+    async with (
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client,
+        AsyncClient(base_url=base_url) as gateway_client,
+    ):
+        session_response = await client.post(
+            "/api/session",
+            json={
+                "accessToken": "test-access-token",
+                "ssoUrl": f"{base_url}/sso",
+                "gatewayUrl": base_url,
+                "wssUrl": _build_live_updates_url(base_url),
+            },
+        )
+        assert session_response.status_code == 200
+
+        response = await _open_live_updates_stream(app)
+        try:
+            await _wait_for_status_event(response, "connected")
+
+            disconnect_response = await gateway_client.post("/api/test/live-updates/disconnect")
+            assert disconnect_response.status_code == 200
+
+            degraded_payload = await _wait_for_status_event(response, "degraded")
+        finally:
+            await response.body_iterator.aclose()
+
+    assert degraded_payload == {
+        "eventType": "status",
+        "status": "degraded",
+        "lastError": "Live updates disconnected.",
+    }

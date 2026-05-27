@@ -66,7 +66,7 @@ The application reads `.env` values with the `BLUETTI_` prefix. The initial boot
 - app and server: `BLUETTI_APP_NAME`, `BLUETTI_ENVIRONMENT`, `BLUETTI_SERVER_HOST`, `BLUETTI_SERVER_PORT`, `BLUETTI_DEV_RELOAD`
 - BLUETTI cloud endpoints: `BLUETTI_CLOUD_SSO_URL`, `BLUETTI_CLOUD_GATEWAY_URL`, `BLUETTI_CLOUD_WSS_URL`
 - session and refresh tokens: `BLUETTI_ACCESS_TOKEN`, `BLUETTI_REFRESH_TOKEN`, `BLUETTI_OAUTH_CLIENT_ID`, `BLUETTI_OAUTH_CLIENT_SECRET`, `BLUETTI_OAUTH_STATE_TTL_SECONDS`, `BLUETTI_TOKEN_STORE_PATH`
-- live verification gate: `BLUETTI_ENABLE_LIVE_ACCOUNT_VERIFICATION`
+- live update and verification gates: `BLUETTI_ENABLE_FAKE_GATEWAY_LIVE_UPDATES`, `BLUETTI_ENABLE_LIVE_ACCOUNT_VERIFICATION`
 - runtime behavior: `BLUETTI_REQUEST_TIMEOUT_SECONDS`
 
 Default runtime path behavior now depends on the startup mode:
@@ -103,25 +103,49 @@ This check keeps the focused backend or core regression harness aligned with the
 Run the focused backend and frontend regression checks for backend-owned live updates:
 
 ```bash
-.venv/bin/python -m pytest tests/backend/test_live_updates_manager.py tests/backend/test_live_updates_stream.py tests/backend/test_backend_session_state.py
+.venv/bin/python -m pytest tests/backend/test_live_updates_manager.py tests/backend/test_live_updates_stream.py tests/backend/test_backend_session_state.py tests/core/test_websocket_client.py
 node --check src/bluetti_connector/web/assets/app.js
 node --test tests/web/test_app_live_updates.mjs
 ```
 
 These checks verify backend websocket lifecycle status, the local SSE stream surface, and the browser-side device-card refresh plus degraded-status UI behavior without requiring a live BLUETTI account.
 
+### Offline Fake-Gateway Live Update Verification
+
+Run the repository-local end-to-end live-update checks against the fake gateway:
+
+```bash
+.venv/bin/python -m pytest tests/backend/test_backend_smoke.py -k live_update
+```
+
+This check exercises the opt-in loopback `ws://` gate, the fake-gateway websocket or STOMP surface, backend SSE fan-out, and degraded disconnect fallback without requiring real-account `wss://` access.
+
 ### Local UI Smoke Harness
 
 Use the reusable fake gateway to validate the browser flow without a real BLUETTI account:
 
 1. Start the fake gateway: `.venv/bin/python tests/fake_bluetti_gateway.py --port 18081`
-2. Start the local app from the repository root: `bluetti-connector-dev`
+2. Start the local app from the repository root with loopback fake-gateway live updates enabled: `BLUETTI_ENABLE_FAKE_GATEWAY_LIVE_UPDATES=true bluetti-connector-dev`
 3. Open `http://127.0.0.1:8080`
 4. Click `Load devices` before configuring a session and confirm the page shows the backend session error
-5. Fill the session form with `expired-access-token` as the access token, `test-refresh-token` as the refresh token, `http://127.0.0.1:18081` as Gateway URL, `http://127.0.0.1:18081/sso` as SSO URL, and `ws://127.0.0.1/unused` as WebSocket URL
+5. Fill the session form with `expired-access-token` as the access token, `test-refresh-token` as the refresh token, `http://127.0.0.1:18081` as Gateway URL, `http://127.0.0.1:18081/sso` as SSO URL, and `ws://127.0.0.1:18081/api/edgeiotgw/ws-coordination` as WebSocket URL
 6. Save the session and confirm the page renders `Workshop Battery` even though the initial access token is stale
-7. Confirm the runtime panel reports live updates as disabled and the devices section explains that manual refresh remains available, because the fake gateway flow intentionally uses an unsupported `ws://` URL
-8. Refresh devices, toggle `AC Output`, and change `Working mode`; confirm success feedback and the runtime panel shows that both access and refresh tokens are present
+7. Confirm the runtime panel reports live updates as connected for the loopback fake gateway instead of falling back immediately to manual refresh
+8. Trigger a fake disconnect and confirm the runtime panel falls back to degraded or manual-refresh messaging:
+
+```bash
+curl -sS -X POST http://127.0.0.1:18081/api/test/live-updates/disconnect
+```
+
+9. Optional: publish a fake device-update hint for local experiments:
+
+```bash
+curl -sS -X POST http://127.0.0.1:18081/api/test/live-updates/device-update \
+	-H 'Content-Type: application/json' \
+	-d '{"deviceSn":"AC200L-TEST-001"}'
+```
+
+10. Refresh devices, toggle `AC Output`, and change `Working mode`; confirm success feedback and the runtime panel shows that both access and refresh tokens are present
 
 ### Browser OAuth Verification
 
@@ -168,6 +192,7 @@ Implemented in the current baseline:
 - local backend session setup, refresh-token bootstrap, backend-owned browser OAuth start/callback flow, device listing, device refresh, safe switch-style or select-style command execution, and backend-owned live-update lifecycle management
 - backend-served local UI with loading, empty, error, richer device-state display, safe command controls, backend-owned live-update status, and automatic per-device refresh when the backend publishes sanitized device-update events
 - deterministic smoke verification against a fake BLUETTI gateway, including token refresh and retry recovery, plus focused backend and frontend regression coverage for browser OAuth, live-update status, SSE fan-out, and UI refresh behavior
+- deterministic smoke verification against a fake BLUETTI gateway, including token refresh and retry recovery, plus focused backend and frontend regression coverage for browser OAuth, live-update status, SSE fan-out, loopback fake-gateway websocket delivery, disconnect fallback, and UI refresh behavior
 - gated backend-owned live-account verification with fail-fast prerequisite validation and staged sanitized reporting for auth, devices, and live-update readiness
 - a repository-local `swift/BluettiKit` package that implements native BLUETTI OAuth, token refresh, device discovery, battery and power helpers, and AC/DC control flow for Xcode-based macOS apps without Python runtime dependencies
 - a repository-local `swift/BluettiMonitorSample` menu bar app sample that shows how to use `BluettiKit` from SwiftUI with browser login, device polling, low-battery notifications, device selection, and AC/DC output control
@@ -176,4 +201,4 @@ Still intentionally out of scope for the first change:
 
 - default CI execution of live-account verification against real BLUETTI cloud
 - free-form numeric or text command entry for BLUETTI states that do not expose safe allowed values in the current snapshot
-- native installers, service-manager integration, multi-user behavior, and fake-gateway websocket simulation
+- native installers, service-manager integration, multi-user behavior, and richer fake-gateway state-mutation tooling beyond the targeted live-update test endpoints

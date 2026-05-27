@@ -128,6 +128,57 @@ def test_configure_session_with_refresh_only_request_persists_token_store(tmp_pa
     assert live_updates.calls[-1] == (None, settings.cloud_wss_url)
 
 
+def test_configure_session_keeps_fake_gateway_ws_disabled_by_default(tmp_path: Path) -> None:
+    settings = _make_settings(tmp_path)
+    service = BackendService(settings)
+
+    snapshot = service.configure_session(
+        SessionSetupRequest(
+            accessToken="request-access-token",
+            wssUrl="ws://127.0.0.1:18081/ws-coordination",
+        )
+    )
+
+    assert snapshot.liveUpdates.status == "disabled"
+    assert snapshot.liveUpdates.configured is False
+
+
+def test_configure_session_allows_fake_gateway_ws_with_explicit_opt_in(tmp_path: Path) -> None:
+    settings = _make_settings(
+        tmp_path,
+        enable_fake_gateway_live_updates=True,
+    )
+    service = BackendService(settings)
+
+    snapshot = service.configure_session(
+        SessionSetupRequest(
+            accessToken="request-access-token",
+            wssUrl="ws://127.0.0.1:18081/ws-coordination",
+        )
+    )
+
+    assert snapshot.liveUpdates.configured is True
+    assert snapshot.liveUpdates.status in {"connecting", "degraded"}
+
+
+def test_configure_session_rejects_non_loopback_fake_gateway_ws_even_with_opt_in(tmp_path: Path) -> None:
+    settings = _make_settings(
+        tmp_path,
+        enable_fake_gateway_live_updates=True,
+    )
+    service = BackendService(settings)
+
+    snapshot = service.configure_session(
+        SessionSetupRequest(
+            accessToken="request-access-token",
+            wssUrl="ws://gw.example/ws-coordination",
+        )
+    )
+
+    assert snapshot.liveUpdates.configured is False
+    assert snapshot.liveUpdates.status == "disabled"
+
+
 def test_session_setup_request_rejects_missing_auth_inputs() -> None:
     with pytest.raises(ValidationError):
         SessionSetupRequest()

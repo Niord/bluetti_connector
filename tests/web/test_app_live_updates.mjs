@@ -374,6 +374,12 @@ test('live update events refresh visible devices and update runtime status feedb
         (call) => call.url === `/api/devices/${encodeURIComponent(DEVICE_SN)}/refresh` && call.method === 'POST'
       )
     );
+    assert.equal(
+      harness.fetchCalls.filter(
+        (call) => call.url === `/api/devices/${encodeURIComponent(DEVICE_SN)}/refresh` && call.method === 'POST'
+      ).length,
+      1
+    );
     assert.equal(deviceGrid.children.length, 1);
     assert.match(deviceGrid.children[0].innerHTML, /PV Priority/);
 

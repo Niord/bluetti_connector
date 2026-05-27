@@ -2,12 +2,51 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
+import json
 
 from aiohttp import web
 
 
 DEVICE_SN = "AC200L-TEST-001"
 CONTROL_CODE = "AC_OUTPUT_ON"
+LIVE_UPDATE_USER = "fake-user"
+
+
+def _parse_stomp_headers(frame: str) -> tuple[str, dict[str, str]]:
+    lines = frame.replace("\x00", "").splitlines()
+    if not lines:
+        return "", {}
+
+    headers: dict[str, str] = {}
+    for line in lines[1:]:
+        if not line:
+            break
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        headers[key] = value.strip()
+    return lines[0].strip(), headers
+
+
+def _build_connected_frame() -> str:
+    return (
+        "CONNECTED\n"
+        "version:1.2\n"
+        "heart-beat:10000,10000\n"
+        f"user-name:{LIVE_UPDATE_USER}\n"
+        "\n\x00"
+    )
+
+
+def _build_message_frame(*, destination: str, body: str) -> str:
+    return (
+        "MESSAGE\n"
+        "subscription:clientUniqueId\n"
+        f"destination:{destination}\n"
+        "content-type:application/json\n"
+        "\n"
+        f"{body}\x00"
+    )
 
 
 def build_state() -> dict[str, object]:
@@ -39,6 +78,9 @@ def build_state() -> dict[str, object]:
         "active_access_token": "test-access-token",
         "active_refresh_token": "test-refresh-token",
         "refresh_requests": [],
+        "live_update_sockets": [],
+        "last_live_update_subscription": None,
+        "reject_next_live_update_connection": False,
     }
 
 
@@ -125,10 +167,78 @@ def create_fake_gateway_app() -> web.Application:
             }
         )
 
+    async def websocket_handler(request: web.Request) -> web.StreamResponse:
+        ws = web.WebSocketResponse(heartbeat=30)
+        await ws.prepare(request)
+
+        try:
+            async for message in ws:
+                if message.type != web.WSMsgType.TEXT:
+                    continue
+                if not message.data or message.data == "\n":
+                    continue
+
+                command, headers = _parse_stomp_headers(message.data)
+                if command == "CONNECT":
+                    if state["reject_next_live_update_connection"]:
+                        state["reject_next_live_update_connection"] = False
+                        await ws.close(message=b"rejected")
+                        break
+                    if headers.get("Authorization") != state["active_access_token"]:
+                        await ws.close(message=b"unauthorized")
+                        break
+                    await ws.send_str(_build_connected_frame())
+                    continue
+
+                if command == "SUBSCRIBE":
+                    state["last_live_update_subscription"] = headers.get("destination")
+                    state["live_update_sockets"].append(ws)
+        finally:
+            state["live_update_sockets"] = [
+                active_socket
+                for active_socket in state["live_update_sockets"]
+                if active_socket is not ws and not active_socket.closed
+            ]
+
+        return ws
+
+    async def emit_live_update_handler(request: web.Request) -> web.Response:
+        payload = await request.json()
+        device_sn = payload.get("deviceSn") or DEVICE_SN
+        destination = state["last_live_update_subscription"] or f"/ws-subscribe/user/{LIVE_UPDATE_USER}/notify"
+        frame = _build_message_frame(
+            destination=destination,
+            body=json.dumps({"data": {"deviceSn": device_sn}}),
+        )
+
+        live_update_sockets = [socket for socket in state["live_update_sockets"] if not socket.closed]
+        state["live_update_sockets"] = live_update_sockets
+        for socket in live_update_sockets:
+            await socket.send_str(frame)
+
+        return web.json_response(
+            {
+                "accepted": True,
+                "deviceSn": device_sn,
+                "subscriberCount": len(live_update_sockets),
+            }
+        )
+
+    async def disconnect_live_updates_handler(request: web.Request) -> web.Response:
+        state["reject_next_live_update_connection"] = True
+        for socket in list(state["live_update_sockets"]):
+            if not socket.closed:
+                await socket.close()
+        state["live_update_sockets"] = []
+        return web.json_response({"accepted": True})
+
     app.router.add_get("/api/bluiotdata/ha/v1/devices", devices_handler)
     app.router.add_get("/api/bluiotdata/ha/v1/deviceStates", device_states_handler)
     app.router.add_post("/api/bluiotdata/ha/v1/fulfillment", control_handler)
     app.router.add_post("/sso/oauth2/token", token_handler)
+    app.router.add_get("/api/edgeiotgw/ws-coordination/websocket", websocket_handler)
+    app.router.add_post("/api/test/live-updates/device-update", emit_live_update_handler)
+    app.router.add_post("/api/test/live-updates/disconnect", disconnect_live_updates_handler)
     return app
 
 

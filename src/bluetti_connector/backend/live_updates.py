@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import json
 from threading import Lock
 from typing import Callable, Literal
+from ipaddress import ip_address
 from urllib.parse import urlparse
 
 from ..core import StompClient
@@ -30,8 +31,14 @@ class LiveUpdatesSnapshot:
 
 
 class LiveUpdatesManager:
-    def __init__(self, stomp_client_factory: StompClientFactory = StompClient) -> None:
+    def __init__(
+        self,
+        stomp_client_factory: StompClientFactory = StompClient,
+        *,
+        allow_insecure_loopback_ws: bool = False,
+    ) -> None:
         self._stomp_client_factory = stomp_client_factory
+        self._allow_insecure_loopback_ws = allow_insecure_loopback_ws
         self._lock = Lock()
         self._client: StompClient | None = None
         self._access_token: str | None = None
@@ -206,8 +213,25 @@ class LiveUpdatesManager:
         for loop, queue in subscribers:
             loop.call_soon_threadsafe(queue.put_nowait, event)
 
-    @staticmethod
-    def _supports_live_updates(wss_url: str | None) -> bool:
+    def _supports_live_updates(self, wss_url: str | None) -> bool:
         if not wss_url:
             return False
-        return urlparse(wss_url).scheme.lower() == "wss"
+
+        parsed = urlparse(wss_url)
+        scheme = parsed.scheme.lower()
+        if scheme == "wss":
+            return True
+        if scheme != "ws" or not self._allow_insecure_loopback_ws:
+            return False
+        return self._is_loopback_host(parsed.hostname)
+
+    @staticmethod
+    def _is_loopback_host(hostname: str | None) -> bool:
+        if not hostname:
+            return False
+        if hostname == "localhost":
+            return True
+        try:
+            return ip_address(hostname).is_loopback
+        except ValueError:
+            return False

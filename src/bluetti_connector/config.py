@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     oauth_client_secret: str = "SG9tZUFzc2lzdGFudA=="
     oauth_state_ttl_seconds: int = 600
     enable_live_account_verification: bool = False
+    enable_fake_gateway_live_updates: bool = False
     runtime_profile: RuntimeProfile = RuntimeProfile.DEVELOPMENT
     token_store_path: str | None = None
 
