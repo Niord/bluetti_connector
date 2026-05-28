@@ -129,7 +129,6 @@ final class BluettiLiveUpdateTests: XCTestCase {
             tokenStore: InMemoryTokenStore(
                 initialTokens: BluettiTokenState(accessToken: "active-access", refreshToken: "refresh-token")
             ),
-            session: URLSession(configuration: .ephemeral),
             webSocketTaskFactory: { _ in socketTask }
         )
     }

@@ -64,7 +64,14 @@ jobs:
 
       - name: Run BluettiKit tests
         working-directory: swift/BluettiKit
-        run: swift test
+        run: |
+          swift build --build-tests
+          test_bundle="$(find .build -name 'BluettiKitPackageTests.xctest' -print -quit)"
+          if [[ -z "$test_bundle" ]]; then
+            echo "BluettiKitPackageTests.xctest not found under .build" >&2
+            exit 1
+          fi
+          xcrun xctest "$test_bundle"
 
       - name: Build BluettiMonitorSample
         working-directory: swift/BluettiMonitorSample

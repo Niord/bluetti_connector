@@ -592,14 +592,18 @@ public actor BluettiClient {
 
     private func stopLiveUpdatesInternal(resetToDisabled: Bool) async {
         let webSocketTask = liveUpdateWebSocketTask
+        let receiveTask = liveUpdateReceiveTask
+        let heartbeatTask = liveUpdateHeartbeatTask
         liveUpdateWebSocketTask = nil
-        liveUpdateReceiveTask?.cancel()
         liveUpdateReceiveTask = nil
-        liveUpdateHeartbeatTask?.cancel()
         liveUpdateHeartbeatTask = nil
         liveUpdateAccessToken = nil
         currentLiveUpdateSocketURL = nil
+        receiveTask?.cancel()
+        heartbeatTask?.cancel()
         await webSocketTask?.cancel(with: .normalClosure, reason: nil)
+        await receiveTask?.value
+        await heartbeatTask?.value
 
         if resetToDisabled {
             updateLiveUpdateSnapshot(
