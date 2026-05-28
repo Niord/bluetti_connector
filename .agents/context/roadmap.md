@@ -29,7 +29,7 @@
 - Backend-owned live updates now cover backend-managed BLUETTI websocket lifecycle, `/api/live-updates` SSE fan-out, session-level live-update status, and browser-side auto-refresh for visible device cards.
 - Repository-local fake-gateway verification now covers opt-in loopback `ws://` delivery, backend SSE fan-out, and degraded disconnect fallback without real-account dependencies.
 - Backend-owned live updates still degrade cleanly to manual refresh when websocket startup, authentication, disconnect, or unsupported non-loopback `ws://` configuration prevents live delivery.
-- The public Swift CI path now runs `swift build --build-tests` plus an explicit `xcrun xctest` bundle invocation, and the native live-update tests now wait for stream subscription readiness plus XCTest expectation-based collection so the CI gate fails fast instead of hanging when a collector misses an event.
+- The public repository automation now keeps Python and web checks on a cheap Linux workflow, runs the macOS Swift workflow only for Swift-related changes or manual dispatch, cancels superseded runs on the same ref, and caps the Swift job runtime while still using `swift build --build-tests` plus explicit `xcrun xctest` and the synchronized native live-update tests.
 - The current roadmap focus is extending operator confidence from gated live-account verification toward repeatable end-to-end verification workflows.
 
 ## Next Workstreams

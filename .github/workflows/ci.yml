@@ -1,8 +1,12 @@
-name: CI
+name: Python and Web CI
 
 on:
   push:
   pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -53,26 +57,3 @@ jobs:
         run: |
           node --check src/bluetti_connector/web/assets/app.js
           node --test tests/web/test_app_live_updates.mjs
-
-  swift:
-    name: Swift Checks
-    runs-on: macos-latest
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Run BluettiKit tests
-        working-directory: swift/BluettiKit
-        run: |
-          swift build --build-tests
-          test_bundle="$(find .build -name 'BluettiKitPackageTests.xctest' -print -quit)"
-          if [[ -z "$test_bundle" ]]; then
-            echo "BluettiKitPackageTests.xctest not found under .build" >&2
-            exit 1
-          fi
-          xcrun xctest "$test_bundle"
-
-      - name: Build BluettiMonitorSample
-        working-directory: swift/BluettiMonitorSample
-        run: swift build
