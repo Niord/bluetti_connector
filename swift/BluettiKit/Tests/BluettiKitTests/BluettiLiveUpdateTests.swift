@@ -6,26 +6,27 @@ final class BluettiLiveUpdateTests: XCTestCase {
     func testStartLiveUpdatesSendsHandshakeAndPublishesDeviceUpdateHints() async throws {
         let socketTask = MockWebSocketTask()
         let client = makeClient(socketTask: socketTask)
-        let collectedEventsTask = Task {
-            let stream = await client.liveUpdates()
-            var iterator = stream.makeAsyncIterator()
-            var events: [BluettiLiveUpdateEvent] = []
-
-            while events.count < 4, let event = await iterator.next() {
-                events.append(event)
-            }
-            return events
-        }
+        let subscriptionReady = expectation(description: "Live update subscription is ready")
+        let eventsReady = expectation(description: "Live update events were collected")
+        let (collectedEventsTask, collectedEvents) = startCollectingLiveUpdateEvents(
+            from: client,
+            expectedCount: 4,
+            subscriptionReady: subscriptionReady,
+            eventsReady: eventsReady
+        )
         addTeardownBlock {
             collectedEventsTask.cancel()
             await client.stopLiveUpdates()
+            await collectedEventsTask.value
         }
 
+        await fulfillment(of: [subscriptionReady], timeout: 1.0)
         await client.startLiveUpdates()
         await socketTask.enqueue(text: connectedFrame(userName: "swift-user"))
         await socketTask.enqueue(text: deviceUpdateFrame(serialNumber: "AC200L-TEST-001"))
 
-        let events = try await valueWithTimeout(of: collectedEventsTask, timeout: .seconds(1))
+        await fulfillment(of: [eventsReady], timeout: 1.0)
+        let events = await collectedEvents.snapshot()
         let sentFrames = await socketTask.sentTextFrames()
         let isResumed = await socketTask.resumed()
 
@@ -46,26 +47,27 @@ final class BluettiLiveUpdateTests: XCTestCase {
     func testLiveUpdatesDegradeOnDisconnect() async throws {
         let socketTask = MockWebSocketTask()
         let client = makeClient(socketTask: socketTask)
-        let collectedEventsTask = Task {
-            let stream = await client.liveUpdates()
-            var iterator = stream.makeAsyncIterator()
-            var events: [BluettiLiveUpdateEvent] = []
-
-            while events.count < 4, let event = await iterator.next() {
-                events.append(event)
-            }
-            return events
-        }
+        let subscriptionReady = expectation(description: "Disconnect subscription is ready")
+        let eventsReady = expectation(description: "Disconnect events were collected")
+        let (collectedEventsTask, collectedEvents) = startCollectingLiveUpdateEvents(
+            from: client,
+            expectedCount: 4,
+            subscriptionReady: subscriptionReady,
+            eventsReady: eventsReady
+        )
         addTeardownBlock {
             collectedEventsTask.cancel()
             await client.stopLiveUpdates()
+            await collectedEventsTask.value
         }
 
+        await fulfillment(of: [subscriptionReady], timeout: 1.0)
         await client.startLiveUpdates()
         await socketTask.enqueue(text: connectedFrame(userName: "swift-user"))
         await socketTask.fail(TestLiveUpdateError.disconnected)
 
-        let events = try await valueWithTimeout(of: collectedEventsTask, timeout: .seconds(1))
+        await fulfillment(of: [eventsReady], timeout: 1.0)
+        let events = await collectedEvents.snapshot()
 
         XCTAssertEqual(
             events,
@@ -83,26 +85,27 @@ final class BluettiLiveUpdateTests: XCTestCase {
     func testLiveUpdatesDegradeOnAuthenticationFailure() async throws {
         let socketTask = MockWebSocketTask()
         let client = makeClient(socketTask: socketTask)
-        let collectedEventsTask = Task {
-            let stream = await client.liveUpdates()
-            var iterator = stream.makeAsyncIterator()
-            var events: [BluettiLiveUpdateEvent] = []
-
-            while events.count < 4, let event = await iterator.next() {
-                events.append(event)
-            }
-            return events
-        }
+        let subscriptionReady = expectation(description: "Authentication failure subscription is ready")
+        let eventsReady = expectation(description: "Authentication failure events were collected")
+        let (collectedEventsTask, collectedEvents) = startCollectingLiveUpdateEvents(
+            from: client,
+            expectedCount: 4,
+            subscriptionReady: subscriptionReady,
+            eventsReady: eventsReady
+        )
         addTeardownBlock {
             collectedEventsTask.cancel()
             await client.stopLiveUpdates()
+            await collectedEventsTask.value
         }
 
+        await fulfillment(of: [subscriptionReady], timeout: 1.0)
         await client.startLiveUpdates()
         await socketTask.enqueue(text: connectedFrame(userName: "swift-user"))
         await socketTask.enqueue(text: authenticationExpiredErrorFrame())
 
-        let events = try await valueWithTimeout(of: collectedEventsTask, timeout: .seconds(1))
+        await fulfillment(of: [eventsReady], timeout: 1.0)
+        let events = await collectedEvents.snapshot()
 
         XCTAssertEqual(
             events,
@@ -165,22 +168,43 @@ final class BluettiLiveUpdateTests: XCTestCase {
         """
     }
 
-    private func valueWithTimeout<T>(of task: Task<T, Never>, timeout: Duration) async throws -> T {
-        try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask {
-                await task.value
-            }
-            group.addTask {
-                try await Task.sleep(for: timeout)
-                throw TimeoutError.timedOut
+    private func startCollectingLiveUpdateEvents(
+        from client: BluettiClient,
+        expectedCount: Int,
+        subscriptionReady: XCTestExpectation,
+        eventsReady: XCTestExpectation
+    ) -> (Task<Void, Never>, LiveUpdateEventStore) {
+        let collectedEvents = LiveUpdateEventStore()
+        let collectedEventsTask = Task {
+            let stream = await client.liveUpdates()
+            subscriptionReady.fulfill()
+
+            var iterator = stream.makeAsyncIterator()
+            var events: [BluettiLiveUpdateEvent] = []
+
+            while events.count < expectedCount, let event = await iterator.next() {
+                events.append(event)
             }
 
-            guard let value = try await group.next() else {
-                throw TimeoutError.timedOut
+            await collectedEvents.replace(with: events)
+            if events.count == expectedCount {
+                eventsReady.fulfill()
             }
-            group.cancelAll()
-            return value
         }
+
+        return (collectedEventsTask, collectedEvents)
+    }
+}
+
+private actor LiveUpdateEventStore {
+    private var events: [BluettiLiveUpdateEvent] = []
+
+    func replace(with events: [BluettiLiveUpdateEvent]) {
+        self.events = events
+    }
+
+    func snapshot() -> [BluettiLiveUpdateEvent] {
+        events
     }
 }
 
@@ -254,8 +278,4 @@ private actor MockWebSocketTask: BluettiWebSocketTaskProtocol {
 
 private enum TestLiveUpdateError: Error {
     case disconnected
-}
-
-private enum TimeoutError: Error {
-    case timedOut
 }
