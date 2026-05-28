@@ -195,7 +195,7 @@ final class BluettiManager: ObservableObject {
 
     init() {
         Task {
-            await requestNotificationPermission()
+            await Self.requestNotificationPermission()
             await restoreSessionIfPossible()
         }
     }
@@ -484,7 +484,9 @@ final class BluettiManager: ObservableObject {
         }
     }
 
-    private func requestNotificationPermission() async {
+    private nonisolated static func requestNotificationPermission() async {
+        let notificationCenter = UNUserNotificationCenter.current()
+
         do {
             _ = try await notificationCenter.requestAuthorization(options: [.alert, .sound])
         } catch {

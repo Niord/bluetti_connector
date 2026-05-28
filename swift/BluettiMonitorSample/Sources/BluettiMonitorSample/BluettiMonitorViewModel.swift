@@ -40,7 +40,7 @@ final class BluettiMonitorViewModel: ObservableObject {
         self.refreshInterval = refreshInterval
 
         Task {
-            await requestNotificationPermission()
+            await Self.requestNotificationPermission()
             await restoreSessionIfPossible()
         }
     }
@@ -434,7 +434,9 @@ final class BluettiMonitorViewModel: ObservableObject {
         ensurePollingTask()
     }
 
-    private func requestNotificationPermission() async {
+    private nonisolated static func requestNotificationPermission() async {
+        let notificationCenter = UNUserNotificationCenter.current()
+
         do {
             _ = try await notificationCenter.requestAuthorization(options: [.alert, .sound])
         } catch {
